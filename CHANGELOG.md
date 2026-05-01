@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] — 2026-05-02
+
+### Fixed
+
+- `serverInfo.version` now reads from `package.json` at startup instead
+  of a hardcoded constant. The constant had drifted from `1.0.0-rc.1`
+  through the 1.0.0 / 1.0.1 / 1.0.2 releases — `initialize` clients saw
+  the wrong version. Single source of truth: the same `package.json`
+  that ships in the tarball.
+
+### Changed
+
+- `instructions` string returned in `initialize` rewritten to enumerate
+  all 12 tools (was listing only 6). LLM clients can now surface the
+  hearing-schedule and order-listing tools without having to discover
+  them through `tools/list` annotations alone.
+
+[1.0.3]: https://github.com/nalyk/ansc-mcp-server/releases/tag/v1.0.3
+
 ## [1.0.2] — 2026-05-02
 
 ### Changed

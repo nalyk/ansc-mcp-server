@@ -9,9 +9,12 @@ import { registerResources } from './handlers/resources.js';
 import { registerPrompts } from './handlers/prompts.js';
 import { buildAuthHandles } from './http/auth.js';
 import { startHttpServer } from './http/server.js';
+import pkg from '../package.json' with { type: 'json' };
 
+// Single source of truth: read version from the published package.json so
+// `serverInfo.version` cannot drift from the npm tarball that ships it.
 const NAME = 'ansc-server';
-const VERSION = '1.0.0-rc.1';
+const VERSION: string = pkg.version;
 
 async function main(): Promise<void> {
   const cfg = loadConfig();
@@ -41,10 +44,20 @@ async function main(): Promise<void> {
         },
         instructions:
           'Tools, resources, and prompts for Moldovan public-procurement appeals (ANSC). ' +
-          'All tools are read-only and idempotent. ' +
-          'Browse with search_appeals / search_decisions; direct lookup with ' +
-          'get_appeal_by_registration / get_decision_by_number; full procurement history with ' +
-          'get_procurement_history; PDF text via fetch_ansc_decision. Years: 2014–current.',
+          'All 12 tools are read-only and idempotent. ' +
+          'Search: search_appeals, search_decisions, search_orders (încheieri), ' +
+          'search_suspended_decisions (court-suspended). ' +
+          'Direct lookup: get_appeal_by_registration ("02/<seq>/<yy>"), ' +
+          'get_decision_by_number ("<panel>D-<seq>-<yy>"), ' +
+          'get_procurement_history (every appeal + decision for an OCDS ID). ' +
+          'Hearing schedule: list_upcoming_hearings, get_hearings_for_day, ' +
+          'find_hearing_for_appeal ("when is my hearing?"). ' +
+          'Documents: check_decision_court_status (cross-checks the suspended listing — ' +
+          "search_decisions alone reports stale 'În vigoare' for items a court has paused), " +
+          'fetch_ansc_decision (text for native PDFs, per-page images for scanned PDFs ' +
+          'so the host vision-LLM can OCR — no local Tesseract). ' +
+          'Years: 2014–current. Three prompts (summarize_ansc_decision, procurement_audit, ' +
+          'compare_appeals) wrap common analyst workflows.',
       },
     );
     registerTools(server, client);
