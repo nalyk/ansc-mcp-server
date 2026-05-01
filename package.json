@@ -1,11 +1,19 @@
 {
   "name": "mcp-ansc-server",
-  "version": "1.0.0-rc.1",
-  "description": "MCP server for Moldova's National Agency for Solving Complaints (ANSC) — appeals and decisions in public procurement.",
+  "version": "1.0.0",
+  "description": "MCP server for Moldova's National Agency for Solving Complaints (ANSC) — appeals, decisions, hearing schedule, and multi-modal PDF extraction.",
   "type": "module",
   "main": "build/index.js",
   "bin": {
     "mcp-ansc-server": "./build/index.js"
+  },
+  "homepage": "https://github.com/nalyk/ansc-mcp-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/nalyk/ansc-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nalyk/ansc-mcp-server/issues"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -29,7 +37,7 @@
     "appeals"
   ],
   "author": "Ion Nalyk Calmis",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "cheerio": "^1.2.0",

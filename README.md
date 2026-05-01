@@ -1,9 +1,14 @@
 # mcp-ansc-server
 
+[![CI](https://github.com/nalyk/ansc-mcp-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nalyk/ansc-mcp-server/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](.nvmrc)
+[![MCP](https://img.shields.io/badge/MCP-2025--11--25-orange)](https://spec.modelcontextprotocol.io/specification/2025-11-25)
+
 A Model Context Protocol (MCP) server that exposes Moldova's National Agency
 for Solving Complaints (ANSC, *Agenția Națională pentru Soluționarea
-Contestațiilor*) public‑procurement data — appeals, decisions, and decision
-PDFs — to LLMs and other MCP clients.
+Contestațiilor*) public‑procurement data — appeals, decisions, hearing
+schedule, and PDF documents — to LLMs and other MCP clients.
 
 Conformant with **MCP spec 2025‑11‑25** and the **TypeScript SDK 1.29.x**.
 
@@ -118,7 +123,10 @@ Config is parsed by Zod at startup; mis‑configured envs fail fast.
 ### Local
 
 ```bash
-npm install
+git clone git@github.com:nalyk/ansc-mcp-server.git
+cd ansc-mcp-server
+nvm use                       # honors .nvmrc (Node 24)
+npm ci
 npm run build
 npm start                     # stdio
 npm run start:http            # MCP_TRANSPORT=http
@@ -217,3 +225,13 @@ curl -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKE
 
 Hit `/mcp` without a token to see the spec‑compliant 401 + `WWW-Authenticate`
 header pointing to the PRM URL.
+
+---
+
+## Project meta
+
+- **License:** [MIT](LICENSE) © 2026 Ion Nalyk Calmis
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Security:** see [SECURITY.md](SECURITY.md)
+- **Issues / PRs:** [github.com/nalyk/ansc-mcp-server](https://github.com/nalyk/ansc-mcp-server)
+- **MCP spec:** [2025‑11‑25](https://spec.modelcontextprotocol.io/specification/2025-11-25)
