@@ -1,4 +1,4 @@
-import { logger } from '../logging.js';
+import { logger, errMsg } from '../logging.js';
 
 export interface RetryOptions {
   /** Total attempts including the first. */
@@ -64,9 +64,4 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
   });
-}
-
-function errMsg(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
 }

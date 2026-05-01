@@ -4,7 +4,7 @@ import { hostHeaderValidation } from '@modelcontextprotocol/sdk/server/middlewar
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { logger } from '../logging.js';
+import { logger, errMsg } from '../logging.js';
 import type { AppConfig } from '../config.js';
 import type { AuthHandles } from './auth.js';
 
@@ -136,8 +136,4 @@ export async function startHttpServer(
     });
     httpServer.on('error', reject);
   });
-}
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }

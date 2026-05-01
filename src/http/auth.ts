@@ -11,7 +11,7 @@ import type { OAuthTokenVerifier } from '@modelcontextprotocol/sdk/server/auth/p
 import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { OAuthMetadata } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { logger } from '../logging.js';
+import { logger, errMsg } from '../logging.js';
 import type { AppConfig } from '../config.js';
 
 /**
@@ -50,6 +50,8 @@ export class JoseTokenVerifier implements OAuthTokenVerifier {
     try {
       ({ payload } = await jwtVerify(token, this.#jwks, this.#verifyOptions));
     } catch (err) {
+      // Keep a friendly literal fallback rather than errMsg(): InvalidTokenError messages
+      // surface to clients, and 'invalid token' beats stringifying a non-Error throw.
       const message = err instanceof Error ? err.message : 'invalid token';
       logger.debug({ err: message }, 'Bearer token failed JWT verification.');
       throw new InvalidTokenError(message);
@@ -120,9 +122,7 @@ export async function discoverAuthServerMetadata(
     }
   }
   throw new Error(
-    `Failed to discover Authorization Server metadata at ${issuer}: ${
-      lastErr instanceof Error ? lastErr.message : String(lastErr)
-    }`,
+    `Failed to discover Authorization Server metadata at ${issuer}: ${errMsg(lastErr)}`,
   );
 }
 

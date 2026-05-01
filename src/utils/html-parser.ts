@@ -151,6 +151,84 @@ const DECISION_POSITIONAL_FIELDS: readonly (keyof Decision | null)[] = [
   'appealNumber',
 ];
 
+const ORDER_HEADER_MAP: ReadonlyMap<string, keyof Order> = new Map([
+  ['nr. incheiere', 'orderNumber'],
+  ['nr. încheiere', 'orderNumber'],
+  ['data incheiere', 'date'],
+  ['data încheiere', 'date'],
+  ['contestatar', 'challenger'],
+  ['contestator', 'challenger'],
+  ['autoritatea contractanta', 'contractingAuthority'],
+  ['autoritatea contractantă', 'contractingAuthority'],
+  ['elementele contestatiei', 'appealElements'],
+  ['elementele contestației', 'appealElements'],
+  ['continutul incheierii', 'contentRaw'],
+  ['conținutul încheierii', 'contentRaw'],
+  ['complet', 'panel'],
+  ['nr. procedurii', 'procedureNumber'],
+  ['tip procedura', 'procedureType'],
+  ['tip procedură', 'procedureType'],
+  ['obiectul achizitiei', 'procurementObject'],
+  ['obiectul achiziției', 'procurementObject'],
+  ['statut incheiere', 'statusRaw'],
+  ['statut încheiere', 'statusRaw'],
+  ['nr. contestatie', 'appealNumber'],
+  ['nr. contestație', 'appealNumber'],
+  ['încheierea', 'pdfUrl'],
+  ['incheierea', 'pdfUrl'],
+]);
+
+const ORDER_POSITIONAL_FIELDS: readonly (keyof Order)[] = [
+  'orderNumber',
+  'date',
+  'challenger',
+  'contractingAuthority',
+  'appealElements',
+  'contentRaw',
+  'panel',
+  'procedureNumber',
+  'procedureType',
+  'procurementObject',
+  'statusRaw',
+  'appealNumber',
+  'pdfUrl',
+];
+
+const SUSPENDED_HEADER_MAP: ReadonlyMap<string, keyof SuspendedDecision> = new Map([
+  ['nr. deciziei', 'decisionNumber'],
+  ['data deciziei', 'date'],
+  ['contestatar', 'challenger'],
+  ['contestator', 'challenger'],
+  ['autoritatea contractanta', 'contractingAuthority'],
+  ['autoritatea contractantă', 'contractingAuthority'],
+  ['obiectul contestatiei', 'complaintObjectRaw'],
+  ['obiectul contestației', 'complaintObjectRaw'],
+  ['conținutul deciziei', 'contentRaw'],
+  ['continutul deciziei', 'contentRaw'],
+  ['decizia', 'pdfUrl'],
+  ['nr procedurii', 'procedureNumber'],
+  ['nr. procedurii', 'procedureNumber'],
+  ['obiectul achizitiei', 'procurementObject'],
+  ['obiectul achiziției', 'procurementObject'],
+  ['nr. inregistrare contestatie la ansc', 'appealNumber'],
+  ['nr. înregistrare contestație la ansc', 'appealNumber'],
+  ['decizii raportat/neraportat', 'reportingStatus'],
+]);
+
+const SUSPENDED_POSITIONAL_FIELDS: readonly (keyof SuspendedDecision)[] = [
+  'decisionNumber',
+  'date',
+  'challenger',
+  'contractingAuthority',
+  'complaintObjectRaw',
+  'contentRaw',
+  'pdfUrl',
+  'procedureNumber',
+  'procurementObject',
+  'appealNumber',
+  'reportingStatus',
+];
+
 function normalizeHeader(s: string): string {
   return s
     .replace(/\s+/g, ' ')
@@ -183,7 +261,6 @@ function readCell($cells: CheerioRow, idx: number | undefined): string {
 }
 
 function readHref(
-  $: CheerioAPI,
   $cells: CheerioRow,
   idx: number | undefined,
 ): string {
@@ -259,55 +336,55 @@ function extractOcdsId(href: string): string {
   return last.split('?')[0] ?? '';
 }
 
-export function parseAppealsTable(
+// ----------------------------------------------------------------------------
+// Generic table parser. The four ANSC listings (appeals, decisions, orders,
+// suspended decisions) all share a `#myTable` shape with header-then-positional
+// column resolution; only the row constructor and a few thresholds differ.
+// ----------------------------------------------------------------------------
+
+interface TableConfig<T, F extends keyof T> {
+  /** Used in log messages, e.g. 'Appeals'. */
+  label: string;
+  headerMap: ReadonlyMap<string, F>;
+  positionalFields: readonly (F | null)[];
+  /** Minimum cells required to bother parsing the row. */
+  minCells: number;
+  /** Header coverage required to call the run 'header' (rather than 'partial'). */
+  coverageThreshold: number;
+  buildRow: (
+    ctx: { $cells: CheerioRow; get: (field: F) => number | undefined },
+    sinks: { unknownStatuses: Set<string> },
+  ) => T;
+}
+
+function parseTable<T, F extends keyof T>(
   html: string,
   opts: ParseOptions,
-): ParseResult<Appeal> {
+  config: TableConfig<T, F>,
+): ParseResult<T> {
   const $ = cheerio.load(html);
-  const items: Appeal[] = [];
+  const items: T[] = [];
   const unknownStatuses = new Set<string>();
-
-  const { byField, unknown } = buildColumnIndex<Appeal>($, APPEAL_HEADER_MAP);
+  const { byField, unknown } = buildColumnIndex<T>($, config.headerMap);
+  const headerCovered = byField.size >= config.coverageThreshold;
   const headerHadAnyMatch = byField.size > 0;
-  const headerCovered = byField.size >= APPEAL_POSITIONAL_FIELDS.length;
 
   $('#myTable tbody tr').each((_, row) => {
-    const $row = $(row);
-    const $cells = $row.find('td');
+    const $cells = $(row).find('td');
+    if ($cells.length < config.minCells) return;
 
-    if ($cells.length < APPEAL_POSITIONAL_FIELDS.length) return;
-
-    const get = (field: keyof Appeal): number | undefined => {
+    const get = (field: F): number | undefined => {
       const fromHeader = byField.get(field);
       if (fromHeader !== undefined) return fromHeader;
-      const positional = APPEAL_POSITIONAL_FIELDS.indexOf(field);
+      const positional = config.positionalFields.indexOf(field);
       return positional >= 0 ? positional : undefined;
     };
 
-    const procedureHref = readHref($, $cells, get('procedureNumber'));
-    const statusRaw = readCell($cells, get('status'));
-    const entryDate = readCell($cells, get('entryDate'));
-
-    const appeal: Appeal = {
-      registrationNumber: cleanAppealNumber(readCell($cells, get('registrationNumber'))),
-      entryDate,
-      entryDateIso: dmyToIso(entryDate),
-      exitNumber: readCell($cells, get('exitNumber')),
-      challenger: readCell($cells, get('challenger')),
-      contractingAuthority: readCell($cells, get('contractingAuthority')),
-      complaintObject: readCell($cells, get('complaintObject')),
-      procedureNumber: extractOcdsId(procedureHref) || readCell($cells, get('procedureNumber')),
-      procedureType: readCell($cells, get('procedureType')),
-      procurementObject: readCell($cells, get('procurementObject')),
-      status: parseAppealStatus(statusRaw, unknownStatuses),
-      statusRaw,
-    };
-
-    items.push(appeal);
+    items.push(config.buildRow({ $cells, get }, { unknownStatuses }));
   });
 
   const pagination = parsePagination($, opts.requestedPage);
-  const parserMode = headerCovered
+  const parserMode: ParseResult<T>['parserMode'] = headerCovered
     ? 'header'
     : headerHadAnyMatch
       ? 'partial'
@@ -317,13 +394,13 @@ export function parseAppealsTable(
   if (parserMode !== 'header' && items.length > 0) {
     logger.warn(
       { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
-      'Appeals table headers did not fully match. Falling back to positional indices.',
+      `${config.label} table headers did not fully match. Falling back to positional indices.`,
     );
   }
   if (unknownStatuses.size > 0) {
     logger.warn(
       { unknown: [...unknownStatuses] },
-      'Encountered appeal status strings not in APPEAL_STATUS_TEXT_MAP.',
+      `Encountered ${config.label.toLowerCase()} status strings not in maps.`,
     );
   }
 
@@ -334,305 +411,145 @@ export function parseAppealsTable(
     unknownHeaders: unknown,
     unknownStatuses: [...unknownStatuses],
   };
+}
+
+export function parseAppealsTable(
+  html: string,
+  opts: ParseOptions,
+): ParseResult<Appeal> {
+  return parseTable<Appeal, keyof Appeal>(html, opts, {
+    label: 'Appeals',
+    headerMap: APPEAL_HEADER_MAP,
+    positionalFields: APPEAL_POSITIONAL_FIELDS,
+    minCells: APPEAL_POSITIONAL_FIELDS.length,
+    coverageThreshold: APPEAL_POSITIONAL_FIELDS.length,
+    buildRow: ({ $cells, get }, { unknownStatuses }) => {
+      const procedureHref = readHref($cells, get('procedureNumber'));
+      const statusRaw = readCell($cells, get('status'));
+      const entryDate = readCell($cells, get('entryDate'));
+      return {
+        registrationNumber: cleanAppealNumber(readCell($cells, get('registrationNumber'))),
+        entryDate,
+        entryDateIso: dmyToIso(entryDate),
+        exitNumber: readCell($cells, get('exitNumber')),
+        challenger: readCell($cells, get('challenger')),
+        contractingAuthority: readCell($cells, get('contractingAuthority')),
+        complaintObject: readCell($cells, get('complaintObject')),
+        procedureNumber: extractOcdsId(procedureHref) || readCell($cells, get('procedureNumber')),
+        procedureType: readCell($cells, get('procedureType')),
+        procurementObject: readCell($cells, get('procurementObject')),
+        status: parseAppealStatus(statusRaw, unknownStatuses),
+        statusRaw,
+      };
+    },
+  });
 }
 
 export function parseDecisionsTable(
   html: string,
   opts: ParseOptions,
 ): ParseResult<Decision> {
-  const $ = cheerio.load(html);
-  const items: Decision[] = [];
-  const unknownStatuses = new Set<string>();
-
-  const { byField, unknown } = buildColumnIndex<Decision>($, DECISION_HEADER_MAP);
-  const headerHadAnyMatch = byField.size > 0;
-  const headerCovered = byField.size >= DECISION_POSITIONAL_FIELDS.length - 1; // pdfUrl is link-only
-
-  $('#myTable tbody tr').each((_, row) => {
-    const $row = $(row);
-    const $cells = $row.find('td');
-
-    if ($cells.length < DECISION_POSITIONAL_FIELDS.length - 2) return;
-
-    const get = (field: keyof Decision): number | undefined => {
-      const fromHeader = byField.get(field);
-      if (fromHeader !== undefined) return fromHeader;
-      const positional = DECISION_POSITIONAL_FIELDS.indexOf(field);
-      return positional >= 0 ? positional : undefined;
-    };
-
-    const decisionContentRaw = readCell($cells, get('decisionContentRaw'));
-    const decisionStatusRaw = readCell($cells, get('decisionStatusRaw'));
-    const complaintObjectRaw = readCell($cells, get('complaintObjectRaw'));
-
-    const date = readCell($cells, get('date'));
-    const decision: Decision = {
-      decisionNumber: readCell($cells, get('decisionNumber')),
-      date,
-      dateIso: dmyToIso(date),
-      challenger: readCell($cells, get('challenger')),
-      contractingAuthority: readCell($cells, get('contractingAuthority')),
-      complaintObject: parseComplaintObject(complaintObjectRaw),
-      complaintObjectRaw,
-      complaintElements: readCell($cells, get('complaintElements')),
-      complete: readCell($cells, get('complete')),
-      procedureNumber: readCell($cells, get('procedureNumber')),
-      decisionContent: parseDecisionContent(decisionContentRaw, unknownStatuses),
-      decisionContentRaw,
-      procedureType: readCell($cells, get('procedureType')),
-      procurementObject: readCell($cells, get('procurementObject')),
-      decisionStatus: parseDecisionStatus(decisionStatusRaw, unknownStatuses),
-      decisionStatusRaw,
-      pdfUrl: readHref($, $cells, get('pdfUrl')),
-      reportingStatus: readCell($cells, get('reportingStatus')),
-      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
-    };
-
-    items.push(decision);
+  return parseTable<Decision, keyof Decision>(html, opts, {
+    label: 'Decisions',
+    headerMap: DECISION_HEADER_MAP,
+    positionalFields: DECISION_POSITIONAL_FIELDS,
+    minCells: DECISION_POSITIONAL_FIELDS.length - 2,
+    // pdfUrl is link-only (no header text), so 1 less than positional length.
+    coverageThreshold: DECISION_POSITIONAL_FIELDS.length - 1,
+    buildRow: ({ $cells, get }, { unknownStatuses }) => {
+      const decisionContentRaw = readCell($cells, get('decisionContentRaw'));
+      const decisionStatusRaw = readCell($cells, get('decisionStatusRaw'));
+      const complaintObjectRaw = readCell($cells, get('complaintObjectRaw'));
+      const date = readCell($cells, get('date'));
+      return {
+        decisionNumber: readCell($cells, get('decisionNumber')),
+        date,
+        dateIso: dmyToIso(date),
+        challenger: readCell($cells, get('challenger')),
+        contractingAuthority: readCell($cells, get('contractingAuthority')),
+        complaintObject: parseComplaintObject(complaintObjectRaw),
+        complaintObjectRaw,
+        complaintElements: readCell($cells, get('complaintElements')),
+        complete: readCell($cells, get('complete')),
+        procedureNumber: readCell($cells, get('procedureNumber')),
+        decisionContent: parseDecisionContent(decisionContentRaw, unknownStatuses),
+        decisionContentRaw,
+        procedureType: readCell($cells, get('procedureType')),
+        procurementObject: readCell($cells, get('procurementObject')),
+        decisionStatus: parseDecisionStatus(decisionStatusRaw, unknownStatuses),
+        decisionStatusRaw,
+        pdfUrl: readHref($cells, get('pdfUrl')),
+        reportingStatus: readCell($cells, get('reportingStatus')),
+        appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
+      };
+    },
   });
-
-  const pagination = parsePagination($, opts.requestedPage);
-  const parserMode = headerCovered
-    ? 'header'
-    : headerHadAnyMatch
-      ? 'partial'
-      : 'positional';
-
-  if (parserMode !== 'header' && items.length > 0) {
-    logger.warn(
-      { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
-      'Decisions table headers did not fully match. Falling back to positional indices.',
-    );
-  }
-  if (unknownStatuses.size > 0) {
-    logger.warn(
-      { unknown: [...unknownStatuses] },
-      'Encountered decision status / content strings not in maps.',
-    );
-  }
-
-  return {
-    items,
-    pagination,
-    parserMode,
-    unknownHeaders: unknown,
-    unknownStatuses: [...unknownStatuses],
-  };
 }
-
-// ----------------------------------------------------------------------------
-// Orders (încheieri) — same #myTable structure as decisions, different domain.
-// ----------------------------------------------------------------------------
-
-const ORDER_HEADER_MAP: ReadonlyMap<string, keyof Order> = new Map([
-  ['nr. incheiere', 'orderNumber'],
-  ['nr. încheiere', 'orderNumber'],
-  ['data incheiere', 'date'],
-  ['data încheiere', 'date'],
-  ['contestatar', 'challenger'],
-  ['contestator', 'challenger'],
-  ['autoritatea contractanta', 'contractingAuthority'],
-  ['autoritatea contractantă', 'contractingAuthority'],
-  ['elementele contestatiei', 'appealElements'],
-  ['elementele contestației', 'appealElements'],
-  ['continutul incheierii', 'contentRaw'],
-  ['conținutul încheierii', 'contentRaw'],
-  ['complet', 'panel'],
-  ['nr. procedurii', 'procedureNumber'],
-  ['tip procedura', 'procedureType'],
-  ['tip procedură', 'procedureType'],
-  ['obiectul achizitiei', 'procurementObject'],
-  ['obiectul achiziției', 'procurementObject'],
-  ['statut incheiere', 'statusRaw'],
-  ['statut încheiere', 'statusRaw'],
-  ['nr. contestatie', 'appealNumber'],
-  ['nr. contestație', 'appealNumber'],
-  ['încheierea', 'pdfUrl'],
-  ['incheierea', 'pdfUrl'],
-]);
-
-const ORDER_POSITIONAL_FIELDS: readonly (keyof Order)[] = [
-  'orderNumber',
-  'date',
-  'challenger',
-  'contractingAuthority',
-  'appealElements',
-  'contentRaw',
-  'panel',
-  'procedureNumber',
-  'procedureType',
-  'procurementObject',
-  'statusRaw',
-  'appealNumber',
-  'pdfUrl',
-];
 
 export function parseOrdersTable(
   html: string,
   opts: ParseOptions,
 ): ParseResult<Order> {
-  const $ = cheerio.load(html);
-  const items: Order[] = [];
-  const unknownStatuses = new Set<string>();
-  const { byField, unknown } = buildColumnIndex<Order>($, ORDER_HEADER_MAP);
-  const headerCovered = byField.size >= ORDER_POSITIONAL_FIELDS.length - 1;
-
-  $('#myTable tbody tr').each((_, row) => {
-    const $row = $(row);
-    const $cells = $row.find('td');
-    if ($cells.length < ORDER_POSITIONAL_FIELDS.length - 2) return;
-
-    const get = (field: keyof Order): number | undefined => {
-      const fromHeader = byField.get(field);
-      if (fromHeader !== undefined) return fromHeader;
-      const positional = ORDER_POSITIONAL_FIELDS.indexOf(field);
-      return positional >= 0 ? positional : undefined;
-    };
-
-    const date = readCell($cells, get('date'));
-    const statusRaw = readCell($cells, get('statusRaw'));
-
-    const order: Order = {
-      orderNumber: readCell($cells, get('orderNumber')),
-      date,
-      dateIso: dmyToIso(date),
-      challenger: readCell($cells, get('challenger')),
-      contractingAuthority: readCell($cells, get('contractingAuthority')),
-      appealElements: readCell($cells, get('appealElements')),
-      contentRaw: readCell($cells, get('contentRaw')),
-      panel: readCell($cells, get('panel')),
-      procedureNumber: readCell($cells, get('procedureNumber')),
-      procedureType: readCell($cells, get('procedureType')),
-      procurementObject: readCell($cells, get('procurementObject')),
-      status: parseDecisionStatus(statusRaw, unknownStatuses),
-      statusRaw,
-      pdfUrl: readHref($, $cells, get('pdfUrl')),
-      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
-    };
-    items.push(order);
+  return parseTable<Order, keyof Order>(html, opts, {
+    label: 'Orders',
+    headerMap: ORDER_HEADER_MAP,
+    positionalFields: ORDER_POSITIONAL_FIELDS,
+    minCells: ORDER_POSITIONAL_FIELDS.length - 2,
+    coverageThreshold: ORDER_POSITIONAL_FIELDS.length - 1,
+    buildRow: ({ $cells, get }, { unknownStatuses }) => {
+      const date = readCell($cells, get('date'));
+      const statusRaw = readCell($cells, get('statusRaw'));
+      return {
+        orderNumber: readCell($cells, get('orderNumber')),
+        date,
+        dateIso: dmyToIso(date),
+        challenger: readCell($cells, get('challenger')),
+        contractingAuthority: readCell($cells, get('contractingAuthority')),
+        appealElements: readCell($cells, get('appealElements')),
+        contentRaw: readCell($cells, get('contentRaw')),
+        panel: readCell($cells, get('panel')),
+        procedureNumber: readCell($cells, get('procedureNumber')),
+        procedureType: readCell($cells, get('procedureType')),
+        procurementObject: readCell($cells, get('procurementObject')),
+        status: parseDecisionStatus(statusRaw, unknownStatuses),
+        statusRaw,
+        pdfUrl: readHref($cells, get('pdfUrl')),
+        appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
+      };
+    },
   });
-
-  const pagination = parsePagination($, opts.requestedPage);
-  const parserMode = headerCovered ? 'header' : byField.size > 0 ? 'partial' : 'positional';
-  if (parserMode !== 'header' && items.length > 0) {
-    logger.warn(
-      { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
-      'Orders table headers did not fully match. Falling back to positional indices.',
-    );
-  }
-  return {
-    items,
-    pagination,
-    parserMode,
-    unknownHeaders: unknown,
-    unknownStatuses: [...unknownStatuses],
-  };
 }
-
-// ----------------------------------------------------------------------------
-// Suspended decisions — same #myTable structure, separate listing.
-// ----------------------------------------------------------------------------
-
-const SUSPENDED_HEADER_MAP: ReadonlyMap<string, keyof SuspendedDecision> = new Map([
-  ['nr. deciziei', 'decisionNumber'],
-  ['data deciziei', 'date'],
-  ['contestatar', 'challenger'],
-  ['contestator', 'challenger'],
-  ['autoritatea contractanta', 'contractingAuthority'],
-  ['autoritatea contractantă', 'contractingAuthority'],
-  ['obiectul contestatiei', 'complaintObjectRaw'],
-  ['obiectul contestației', 'complaintObjectRaw'],
-  ['conținutul deciziei', 'contentRaw'],
-  ['continutul deciziei', 'contentRaw'],
-  ['decizia', 'pdfUrl'],
-  ['nr procedurii', 'procedureNumber'],
-  ['nr. procedurii', 'procedureNumber'],
-  ['obiectul achizitiei', 'procurementObject'],
-  ['obiectul achiziției', 'procurementObject'],
-  ['nr. inregistrare contestatie la ansc', 'appealNumber'],
-  ['nr. înregistrare contestație la ansc', 'appealNumber'],
-  ['decizii raportat/neraportat', 'reportingStatus'],
-]);
-
-const SUSPENDED_POSITIONAL_FIELDS: readonly (keyof SuspendedDecision)[] = [
-  'decisionNumber',
-  'date',
-  'challenger',
-  'contractingAuthority',
-  'complaintObjectRaw',
-  'contentRaw',
-  'pdfUrl',
-  'procedureNumber',
-  'procurementObject',
-  'appealNumber',
-  'reportingStatus',
-];
 
 export function parseSuspendedDecisionsTable(
   html: string,
   opts: ParseOptions,
 ): ParseResult<SuspendedDecision> {
-  const $ = cheerio.load(html);
-  const items: SuspendedDecision[] = [];
-  const { byField, unknown } = buildColumnIndex<SuspendedDecision>(
-    $,
-    SUSPENDED_HEADER_MAP,
-  );
-  const headerCovered = byField.size >= SUSPENDED_POSITIONAL_FIELDS.length - 2;
-
-  $('#myTable tbody tr').each((_, row) => {
-    const $row = $(row);
-    const $cells = $row.find('td');
-    if ($cells.length < SUSPENDED_POSITIONAL_FIELDS.length - 2) return;
-
-    const get = (field: keyof SuspendedDecision): number | undefined => {
-      const fromHeader = byField.get(field);
-      if (fromHeader !== undefined) return fromHeader;
-      const positional = SUSPENDED_POSITIONAL_FIELDS.indexOf(field);
-      return positional >= 0 ? positional : undefined;
-    };
-
-    // Suspended-decision PDFs are direct ansc.md/sites/... links, not ELO.
-    const pdfIdx = get('pdfUrl');
-    let pdfUrl = '';
-    if (pdfIdx !== undefined) {
-      const cell = $cells.eq(pdfIdx);
-      pdfUrl = cell.find('a').attr('href') ?? '';
-    }
-
-    const date = readCell($cells, get('date'));
-    const item: SuspendedDecision = {
-      decisionNumber: readCell($cells, get('decisionNumber')),
-      date,
-      dateIso: dmyToIso(date),
-      challenger: readCell($cells, get('challenger')),
-      contractingAuthority: readCell($cells, get('contractingAuthority')),
-      complaintObjectRaw: readCell($cells, get('complaintObjectRaw')),
-      contentRaw: readCell($cells, get('contentRaw')),
-      pdfUrl,
-      procedureNumber: readCell($cells, get('procedureNumber')),
-      procurementObject: readCell($cells, get('procurementObject')),
-      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
-      reportingStatus: readCell($cells, get('reportingStatus')),
-    };
-    items.push(item);
+  return parseTable<SuspendedDecision, keyof SuspendedDecision>(html, opts, {
+    label: 'Suspended-decisions',
+    headerMap: SUSPENDED_HEADER_MAP,
+    positionalFields: SUSPENDED_POSITIONAL_FIELDS,
+    minCells: SUSPENDED_POSITIONAL_FIELDS.length - 2,
+    coverageThreshold: SUSPENDED_POSITIONAL_FIELDS.length - 2,
+    buildRow: ({ $cells, get }) => {
+      const date = readCell($cells, get('date'));
+      // Suspended-decision PDFs are direct ansc.md/sites/... links, not ELO.
+      const pdfUrl = readHref($cells, get('pdfUrl'));
+      return {
+        decisionNumber: readCell($cells, get('decisionNumber')),
+        date,
+        dateIso: dmyToIso(date),
+        challenger: readCell($cells, get('challenger')),
+        contractingAuthority: readCell($cells, get('contractingAuthority')),
+        complaintObjectRaw: readCell($cells, get('complaintObjectRaw')),
+        contentRaw: readCell($cells, get('contentRaw')),
+        pdfUrl,
+        procedureNumber: readCell($cells, get('procedureNumber')),
+        procurementObject: readCell($cells, get('procurementObject')),
+        appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
+        reportingStatus: readCell($cells, get('reportingStatus')),
+      };
+    },
   });
-
-  const pagination = parsePagination($, opts.requestedPage);
-  const parserMode = headerCovered ? 'header' : byField.size > 0 ? 'partial' : 'positional';
-  if (parserMode !== 'header' && items.length > 0) {
-    logger.warn(
-      { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
-      'Suspended-decisions table headers did not fully match. Falling back to positional indices.',
-    );
-  }
-  return {
-    items,
-    pagination,
-    parserMode,
-    unknownHeaders: unknown,
-    unknownStatuses: [],
-  };
 }
 
 // ----------------------------------------------------------------------------

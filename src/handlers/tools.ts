@@ -24,6 +24,18 @@ function yearFromRegOrDecision(kind: 'appeal' | 'decision', id: string): number 
   return kind === 'appeal' ? yearFromAppealRegistration(id) : yearFromDecisionNumber(id);
 }
 
+/**
+ * Canonical MCP tool result envelope. Centralizes the structuredContent cast that
+ * every tool needs (the SDK's CallToolResult requires Record<string, unknown> and
+ * our outputs are typed object shapes).
+ */
+function ok(text: string, structured: object) {
+  return {
+    content: [{ type: 'text' as const, text }],
+    structuredContent: structured as Record<string, unknown>,
+  };
+}
+
 const SearchAppealsOutputShape = {
   items: z.array(AppealSchema),
   pagination: PaginationSchema,
@@ -134,15 +146,10 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     async (args, extra) => {
       const result = await client.searchAppeals(args, extra.signal);
       logger.debug({ count: result.items.length, page: args.page }, 'search_appeals returned.');
-      return {
-        content: [
-          {
-            type: 'text',
-            text: summarizeAppeals(result.items.length, args.year, result.pagination.totalPages),
-          },
-        ],
-        structuredContent: { ...result } as Record<string, unknown>,
-      };
+      return ok(
+        summarizeAppeals(result.items.length, args.year, result.pagination.totalPages),
+        { ...result },
+      );
     },
   );
 
@@ -167,15 +174,10 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     async (args, extra) => {
       const result = await client.searchDecisions(args, extra.signal);
       logger.debug({ count: result.items.length, page: args.page }, 'search_decisions returned.');
-      return {
-        content: [
-          {
-            type: 'text',
-            text: summarizeDecisions(result.items.length, args.year, result.pagination.totalPages),
-          },
-        ],
-        structuredContent: { ...result } as Record<string, unknown>,
-      };
+      return ok(
+        summarizeDecisions(result.items.length, args.year, result.pagination.totalPages),
+        { ...result },
+      );
     },
   );
 
@@ -199,17 +201,10 @@ export function registerTools(server: McpServer, client: AnscClient): void {
       const yearScanned = yearFromRegOrDecision('appeal', args.registrationNumber);
       const appeal = await client.findAppealByRegistration(args.registrationNumber, extra.signal);
       const found = appeal !== null;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: found
-              ? `Found appeal ${appeal!.registrationNumber} (${appeal!.statusRaw}).`
-              : `No appeal '${args.registrationNumber}' found in ANSC ${yearScanned}.`,
-          },
-        ],
-        structuredContent: { found, appeal, yearScanned } as Record<string, unknown>,
-      };
+      const text = found
+        ? `Found appeal ${appeal.registrationNumber} (${appeal.statusRaw}).`
+        : `No appeal '${args.registrationNumber}' found in ANSC ${yearScanned}.`;
+      return ok(text, { found, appeal, yearScanned });
     },
   );
 
@@ -233,17 +228,10 @@ export function registerTools(server: McpServer, client: AnscClient): void {
       const yearScanned = yearFromRegOrDecision('decision', args.decisionNumber);
       const decision = await client.findDecisionByNumber(args.decisionNumber, extra.signal);
       const found = decision !== null;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: found
-              ? `Found decision ${decision!.decisionNumber} (${decision!.decisionStatusRaw}).`
-              : `No decision '${args.decisionNumber}' found in ANSC ${yearScanned}.`,
-          },
-        ],
-        structuredContent: { found, decision, yearScanned } as Record<string, unknown>,
-      };
+      const text = found
+        ? `Found decision ${decision.decisionNumber} (${decision.decisionStatusRaw}).`
+        : `No decision '${args.decisionNumber}' found in ANSC ${yearScanned}.`;
+      return ok(text, { found, decision, yearScanned });
     },
   );
 
@@ -265,23 +253,16 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     },
     async (args, extra) => {
       const result = await client.findCaseByProcedure(args.procedureNumber, extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text:
-              `Procurement ${args.procedureNumber}: ${result.appeals.length} appeal` +
-              `${result.appeals.length === 1 ? '' : 's'}, ${result.decisions.length} decision` +
-              `${result.decisions.length === 1 ? '' : 's'} (years scanned: ${result.yearsScanned.join(', ')}).`,
-          },
-        ],
-        structuredContent: {
-          procedureNumber: args.procedureNumber,
-          yearsScanned: result.yearsScanned,
-          appeals: result.appeals,
-          decisions: result.decisions,
-        } as Record<string, unknown>,
-      };
+      const text =
+        `Procurement ${args.procedureNumber}: ${result.appeals.length} appeal` +
+        `${result.appeals.length === 1 ? '' : 's'}, ${result.decisions.length} decision` +
+        `${result.decisions.length === 1 ? '' : 's'} (years scanned: ${result.yearsScanned.join(', ')}).`;
+      return ok(text, {
+        procedureNumber: args.procedureNumber,
+        yearsScanned: result.yearsScanned,
+        appeals: result.appeals,
+        decisions: result.decisions,
+      });
     },
   );
 
@@ -312,20 +293,13 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     },
     async (args, extra) => {
       const r = await client.searchOrders(args.year, args.page, args.kind, extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${r.items.length} order${r.items.length === 1 ? '' : 's'} (${args.kind}) for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`,
-          },
-        ],
-        structuredContent: {
-          items: r.items,
-          pagination: r.pagination,
-          kind: args.kind,
-          parserMode: r.parserMode,
-        } as Record<string, unknown>,
-      };
+      const text = `Found ${r.items.length} order${r.items.length === 1 ? '' : 's'} (${args.kind}) for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`;
+      return ok(text, {
+        items: r.items,
+        pagination: r.pagination,
+        kind: args.kind,
+        parserMode: r.parserMode,
+      });
     },
   );
 
@@ -355,19 +329,12 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     },
     async (args, extra) => {
       const r = await client.searchSuspendedDecisions(args.year, args.page, extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Found ${r.items.length} suspended decision${r.items.length === 1 ? '' : 's'} for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`,
-          },
-        ],
-        structuredContent: {
-          items: r.items,
-          pagination: r.pagination,
-          parserMode: r.parserMode,
-        } as Record<string, unknown>,
-      };
+      const text = `Found ${r.items.length} suspended decision${r.items.length === 1 ? '' : 's'} for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`;
+      return ok(text, {
+        items: r.items,
+        pagination: r.pagination,
+        parserMode: r.parserMode,
+      });
     },
   );
 
@@ -391,15 +358,7 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     },
     async (_args, extra) => {
       const days = await client.listUpcomingHearings(extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `${days.length} hearing day${days.length === 1 ? '' : 's'} on ANSC's agenda.`,
-          },
-        ],
-        structuredContent: { days } as Record<string, unknown>,
-      };
+      return ok(`${days.length} hearing day${days.length === 1 ? '' : 's'} on ANSC's agenda.`, { days });
     },
   );
 
@@ -442,28 +401,16 @@ export function registerTools(server: McpServer, client: AnscClient): void {
         const days = await client.listUpcomingHearings(extra.signal);
         const match = days.find((d) => d.dateIso === args.dateIso);
         if (!match) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `No published agenda for ${args.dateIso}.`,
-              },
-            ],
-            structuredContent: { dateIso: args.dateIso, hearings: [] } as Record<string, unknown>,
-          };
+          return ok(`No published agenda for ${args.dateIso}.`, {
+            dateIso: args.dateIso,
+            hearings: [],
+          });
         }
         url = match.url;
       }
       const result = await client.getHearingsForDay(url, extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `${result.hearings.length} hearing${result.hearings.length === 1 ? '' : 's'} on ${result.dateIso ?? 'this day'}.`,
-          },
-        ],
-        structuredContent: result as unknown as Record<string, unknown>,
-      };
+      const text = `${result.hearings.length} hearing${result.hearings.length === 1 ? '' : 's'} on ${result.dateIso ?? 'this day'}.`;
+      return ok(text, result);
     },
   );
 
@@ -493,20 +440,10 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     },
     async (args, extra) => {
       const matches = await client.findHearingForAppeal(args.registrationNumber, extra.signal);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: matches.length
-              ? `${matches.length} scheduled hearing${matches.length === 1 ? '' : 's'} for ${args.registrationNumber}.`
-              : `No upcoming hearing currently published for ${args.registrationNumber}.`,
-          },
-        ],
-        structuredContent: {
-          registrationNumber: args.registrationNumber,
-          matches,
-        } as Record<string, unknown>,
-      };
+      const text = matches.length
+        ? `${matches.length} scheduled hearing${matches.length === 1 ? '' : 's'} for ${args.registrationNumber}.`
+        : `No upcoming hearing currently published for ${args.registrationNumber}.`;
+      return ok(text, { registrationNumber: args.registrationNumber, matches });
     },
   );
 
@@ -535,32 +472,18 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     async (args, extra) => {
       const decision = await client.findDecisionByNumber(args.decisionNumber, extra.signal);
       if (!decision) {
-        return {
-          content: [{ type: 'text', text: `Decision ${args.decisionNumber} not found.` }],
-          structuredContent: {
-            decision: null,
-            suspension: null,
-            isSuspended: false,
-          } as Record<string, unknown>,
-        };
+        return ok(`Decision ${args.decisionNumber} not found.`, {
+          decision: null,
+          suspension: null,
+          isSuspended: false,
+        });
       }
       const suspension = await client.findSuspendedFromDecision(decision, extra.signal);
       const isSuspended = suspension !== null;
-      return {
-        content: [
-          {
-            type: 'text',
-            text: isSuspended
-              ? `Decision ${decision.decisionNumber} is COURT-SUSPENDED (suspension entry ${suspension!.decisionNumber}, ${suspension!.date}).`
-              : `Decision ${decision.decisionNumber} is in force; no court suspension found.`,
-          },
-        ],
-        structuredContent: {
-          decision,
-          suspension,
-          isSuspended,
-        } as Record<string, unknown>,
-      };
+      const text = isSuspended
+        ? `Decision ${decision.decisionNumber} is COURT-SUSPENDED (suspension entry ${suspension.decisionNumber}, ${suspension.date}).`
+        : `Decision ${decision.decisionNumber} is in force; no court suspension found.`;
+      return ok(text, { decision, suspension, isSuspended });
     },
   );
 
@@ -612,30 +535,27 @@ export function registerTools(server: McpServer, client: AnscClient): void {
       const truncated = originalBytes > args.maxBytes;
       const text = truncated ? fetched.text.slice(0, args.maxBytes) : fetched.text;
 
-      const structured: Record<string, unknown> = {
-        text,
-        truncated,
-        originalBytes,
-        metadata: {
-          filename: fetched.filename,
-          contentType: fetched.contentType,
-          source: fetched.source,
-          pageCount: fetched.pageCount,
-          byteLength: fetched.byteLength,
-          pdfInfo: fetched.info,
-        },
-      };
+      const summary =
+        `Extracted ${fetched.pageCount}-page PDF (${originalBytes.toLocaleString()} bytes` +
+        `${truncated ? `, truncated to ${args.maxBytes}` : ''}) from ${fetched.filename}.`;
       return {
         content: [
-          {
-            type: 'text',
-            text:
-              `Extracted ${fetched.pageCount}-page PDF (${originalBytes.toLocaleString()} bytes` +
-              `${truncated ? `, truncated to ${args.maxBytes}` : ''}) from ${fetched.filename}.`,
-          },
-          { type: 'text', text },
+          { type: 'text' as const, text: summary },
+          { type: 'text' as const, text },
         ],
-        structuredContent: structured,
+        structuredContent: {
+          text,
+          truncated,
+          originalBytes,
+          metadata: {
+            filename: fetched.filename,
+            contentType: fetched.contentType,
+            source: fetched.source,
+            pageCount: fetched.pageCount,
+            byteLength: fetched.byteLength,
+            pdfInfo: fetched.info,
+          },
+        } as Record<string, unknown>,
       };
     },
   );

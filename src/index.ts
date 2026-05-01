@@ -2,7 +2,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadConfig } from './config.js';
-import { logger } from './logging.js';
+import { logger, errMsg } from './logging.js';
 import { AnscClient } from './api/ansc-client.js';
 import { registerTools } from './handlers/tools.js';
 import { registerResources } from './handlers/resources.js';
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
       if (stdioServer) await stdioServer.close();
       await client.close();
     } catch (err) {
-      logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Error during shutdown.');
+      logger.error({ err: errMsg(err) }, 'Error during shutdown.');
     } finally {
       // Give pino a tick to flush.
       setTimeout(() => process.exit(0), 50).unref();
@@ -101,6 +101,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  logger.fatal({ err: err instanceof Error ? err.message : String(err) }, 'Fatal startup error.');
+  logger.fatal({ err: errMsg(err) }, 'Fatal startup error.');
   process.exit(1);
 });

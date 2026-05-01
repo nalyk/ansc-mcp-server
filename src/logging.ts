@@ -12,3 +12,8 @@ export const logger = pino(
 );
 
 export type Logger = typeof logger;
+
+/** Extract a human-readable message from any thrown value. */
+export function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

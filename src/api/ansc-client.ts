@@ -268,52 +268,79 @@ export class AnscClient {
   ): Promise<{ appeals: Appeal[]; decisions: Decision[]; yearsScanned: number[] }> {
     const trimmedOcds = procedureNumber.trim();
     const yearsScanned = yearsToScanForOcds(trimmedOcds);
+    const appeals = await this.#collectAppealsForProcedure(trimmedOcds, yearsScanned, signal);
+    const decisions = await this.#collectDecisionsForAppeals(
+      appeals,
+      trimmedOcds,
+      yearsScanned,
+      signal,
+    );
+    return { appeals, decisions, yearsScanned };
+  }
 
-    // Fan out across candidate years; ANSC's appeals search is keyed by year.
-    const appealResults = await Promise.all(
-      yearsScanned.map((year) =>
+  /** Fan out across candidate years; ANSC's appeals search is keyed by year. */
+  async #collectAppealsForProcedure(
+    procedureNumber: string,
+    years: number[],
+    signal: AbortSignal | undefined,
+  ): Promise<Appeal[]> {
+    const lists = await Promise.all(
+      years.map((year) =>
         this.#paginateAll((page) =>
-          this.searchAppeals({ procedureNumber: trimmedOcds, year, page }, signal),
+          this.searchAppeals({ procedureNumber, year, page }, signal),
         ),
       ),
     );
-    const appealsSeen = new Set<string>();
+    const seen = new Set<string>();
     const appeals: Appeal[] = [];
-    for (const list of appealResults) {
+    for (const list of lists) {
       for (const a of list) {
-        if (appealsSeen.has(a.registrationNumber)) continue;
-        appealsSeen.add(a.registrationNumber);
+        if (seen.has(a.registrationNumber)) continue;
+        seen.add(a.registrationNumber);
         appeals.push(a);
       }
     }
+    return appeals;
+  }
 
-    const seenDecisions = new Set<string>();
+  /**
+   * For each appeal, look up the decisions that reference its registration
+   * number (in the same year or the next), then keep only those whose
+   * `procedureNumber` matches the procurement we're investigating.
+   */
+  async #collectDecisionsForAppeals(
+    appeals: Appeal[],
+    procedureNumber: string,
+    yearsScanned: number[],
+    signal: AbortSignal | undefined,
+  ): Promise<Decision[]> {
+    const seen = new Set<string>();
     const decisions: Decision[] = [];
     for (const appeal of appeals) {
       const cleanedReg = cleanAppealNumber(appeal.registrationNumber);
       if (!cleanedReg) continue;
+      const appealYear = yearFromAppealRegistration(cleanedReg);
       // The decision linked to an appeal is published in the same or next year.
-      const decisionYears = yearsScanned.includes(yearFromAppealRegistration(cleanedReg))
+      const decisionYears = yearsScanned.includes(appealYear)
         ? yearsScanned
-        : [yearFromAppealRegistration(cleanedReg), yearFromAppealRegistration(cleanedReg) + 1];
-      const decisionLists = await Promise.all(
+        : [appealYear, appealYear + 1];
+      const lists = await Promise.all(
         decisionYears.map((y) =>
           this.#paginateAll((page) =>
             this.searchDecisions({ appealNumber: cleanedReg, year: y, page }, signal),
           ),
         ),
       );
-      for (const list of decisionLists) {
+      for (const list of lists) {
         for (const d of list) {
-          if (d.procedureNumber !== trimmedOcds) continue;
-          if (seenDecisions.has(d.decisionNumber)) continue;
-          seenDecisions.add(d.decisionNumber);
+          if (d.procedureNumber !== procedureNumber) continue;
+          if (seen.has(d.decisionNumber)) continue;
+          seen.add(d.decisionNumber);
           decisions.push(d);
         }
       }
     }
-
-    return { appeals, decisions, yearsScanned };
+    return decisions;
   }
 
   async #scanForMatch<T>(
