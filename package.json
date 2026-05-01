@@ -1,6 +1,6 @@
 {
   "name": "mcp-ansc-server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "MCP server for Moldova's National Agency for Solving Complaints (ANSC) — appeals, decisions, hearing schedule, and multi-modal PDF extraction.",
   "type": "module",
   "main": "build/index.js",
