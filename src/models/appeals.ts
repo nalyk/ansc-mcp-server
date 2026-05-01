@@ -48,6 +48,7 @@ export const APPEAL_STATUS_TEXT_MAP: ReadonlyMap<string, AppealStatus> = new Map
 export const AppealSchema = z.object({
   registrationNumber: z.string().describe("e.g. '02/279/25'"),
   entryDate: z.string().describe("dd/mm/yyyy as ANSC publishes it"),
+  entryDateIso: z.string().nullable().describe('ISO 8601 (yyyy-mm-dd) when parseable, null otherwise.'),
   exitNumber: z.string(),
   challenger: z.string(),
   contractingAuthority: z.string(),

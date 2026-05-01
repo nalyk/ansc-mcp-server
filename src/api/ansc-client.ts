@@ -20,6 +20,15 @@ import {
 import { withRetry } from '../utils/retry.js';
 import type { AppConfig } from '../config.js';
 import { logger } from '../logging.js';
+import {
+  cleanAppealNumber,
+  yearFromAppealRegistration,
+  yearFromDecisionNumber,
+  yearFromOcdsId,
+} from '../utils/identifiers.js';
+
+const FIND_PAGE_CONCURRENCY = 5;
+const FIND_PAGE_HARD_CAP = 100; // safety against runaway scans
 
 const ANSC_BASE = 'https://www.ansc.md';
 
@@ -106,6 +115,142 @@ export class AnscClient {
     );
     const html = await this.#fetchHtml(url, year, signal);
     return parseDecisionsTable(html, { requestedPage: params.page ?? 0 });
+  }
+
+  /**
+   * Direct lookup of a single appeal by its registration number (e.g. '02/1245/24').
+   * Year is parsed from the registration suffix; pages are scanned with bounded
+   * concurrency. Subsequent lookups in the same year hit the HTML cache.
+   */
+  async findAppealByRegistration(
+    rawRegistrationNumber: string,
+    signal?: AbortSignal,
+  ): Promise<Appeal | null> {
+    const target = cleanAppealNumber(rawRegistrationNumber);
+    const year = yearFromAppealRegistration(target);
+    return this.#scanForMatch(
+      (page) => this.searchAppeals({ year, page }, signal),
+      (a) => a.registrationNumber === target,
+    );
+  }
+
+  /**
+   * Direct lookup of a single decision by its decision number (e.g. '03D-962-24').
+   */
+  async findDecisionByNumber(
+    rawDecisionNumber: string,
+    signal?: AbortSignal,
+  ): Promise<Decision | null> {
+    const target = cleanAppealNumber(rawDecisionNumber);
+    const year = yearFromDecisionNumber(target);
+    return this.#scanForMatch(
+      (page) => this.searchDecisions({ year, page }, signal),
+      (d) => d.decisionNumber === target,
+    );
+  }
+
+  /**
+   * Given an OCDS procurement ID, return every appeal filed against it AND every
+   * decision touching it. Appeals are filtered server-side via ANSC's procedure
+   * filter; decisions are looked up per linked appeal (ANSC has no direct
+   * procedure-number filter for the decisions endpoint).
+   */
+  async findCaseByProcedure(
+    procedureNumber: string,
+    signal?: AbortSignal,
+  ): Promise<{ appeals: Appeal[]; decisions: Decision[]; yearsScanned: number[] }> {
+    const trimmedOcds = procedureNumber.trim();
+    const yearsScanned = yearsToScanForOcds(trimmedOcds);
+
+    // Fan out across candidate years; ANSC's appeals search is keyed by year.
+    const appealResults = await Promise.all(
+      yearsScanned.map((year) =>
+        this.#paginateAll((page) =>
+          this.searchAppeals({ procedureNumber: trimmedOcds, year, page }, signal),
+        ),
+      ),
+    );
+    const appealsSeen = new Set<string>();
+    const appeals: Appeal[] = [];
+    for (const list of appealResults) {
+      for (const a of list) {
+        if (appealsSeen.has(a.registrationNumber)) continue;
+        appealsSeen.add(a.registrationNumber);
+        appeals.push(a);
+      }
+    }
+
+    const seenDecisions = new Set<string>();
+    const decisions: Decision[] = [];
+    for (const appeal of appeals) {
+      const cleanedReg = cleanAppealNumber(appeal.registrationNumber);
+      if (!cleanedReg) continue;
+      // The decision linked to an appeal is published in the same or next year.
+      const decisionYears = yearsScanned.includes(yearFromAppealRegistration(cleanedReg))
+        ? yearsScanned
+        : [yearFromAppealRegistration(cleanedReg), yearFromAppealRegistration(cleanedReg) + 1];
+      const decisionLists = await Promise.all(
+        decisionYears.map((y) =>
+          this.#paginateAll((page) =>
+            this.searchDecisions({ appealNumber: cleanedReg, year: y, page }, signal),
+          ),
+        ),
+      );
+      for (const list of decisionLists) {
+        for (const d of list) {
+          if (d.procedureNumber !== trimmedOcds) continue;
+          if (seenDecisions.has(d.decisionNumber)) continue;
+          seenDecisions.add(d.decisionNumber);
+          decisions.push(d);
+        }
+      }
+    }
+
+    return { appeals, decisions, yearsScanned };
+  }
+
+  async #scanForMatch<T>(
+    fetchPage: (page: number) => Promise<{
+      items: T[];
+      pagination: { totalPages: number; hasNextPage: boolean };
+    }>,
+    predicate: (item: T) => boolean,
+  ): Promise<T | null> {
+    const first = await fetchPage(0);
+    const hit = first.items.find(predicate);
+    if (hit) return hit;
+    const total = Math.min(first.pagination.totalPages, FIND_PAGE_HARD_CAP);
+    if (total <= 1) return null;
+
+    const remaining = Array.from({ length: total - 1 }, (_, i) => i + 1);
+    for (let i = 0; i < remaining.length; i += FIND_PAGE_CONCURRENCY) {
+      const batch = remaining.slice(i, i + FIND_PAGE_CONCURRENCY);
+      const results = await Promise.all(batch.map(fetchPage));
+      for (const r of results) {
+        const m = r.items.find(predicate);
+        if (m) return m;
+      }
+    }
+    return null;
+  }
+
+  async #paginateAll<T>(
+    fetchPage: (page: number) => Promise<{
+      items: T[];
+      pagination: { hasNextPage: boolean; totalPages: number };
+    }>,
+  ): Promise<T[]> {
+    const out: T[] = [];
+    const first = await fetchPage(0);
+    out.push(...first.items);
+    if (!first.pagination.hasNextPage) return out;
+    const total = Math.min(first.pagination.totalPages, FIND_PAGE_HARD_CAP);
+    for (let p = 1; p < total; p++) {
+      const r = await fetchPage(p);
+      out.push(...r.items);
+      if (!r.pagination.hasNextPage) break;
+    }
+    return out;
   }
 
   /**
@@ -216,6 +361,23 @@ class RetryableHttpError extends Error {
     this.status = status;
     if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
+}
+
+function yearsToScanForOcds(ocdsId: string): number[] {
+  const fromTimestamp = yearFromOcdsId(ocdsId);
+  const current = new Date().getUTCFullYear();
+  if (fromTimestamp !== null) {
+    // Procurement created in year N may collect appeals through N+2.
+    const start = Math.max(2014, fromTimestamp);
+    const end = Math.min(current, fromTimestamp + 2);
+    const out: number[] = [];
+    for (let y = start; y <= end; y++) out.push(y);
+    return out;
+  }
+  // No timestamp parseable — scan the last 5 years.
+  const out: number[] = [];
+  for (let y = current; y >= Math.max(2014, current - 4); y--) out.push(y);
+  return out;
 }
 
 function isRetryable(err: unknown): boolean {

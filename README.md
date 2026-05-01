@@ -9,19 +9,36 @@ Conformant with **MCP spec 2025‑11‑25** and the **TypeScript SDK 1.29.x**.
 
 ## What it ships
 
-### Tools
+### Tools (6)
 
-| name | annotations | inputs | output |
-|---|---|---|---|
-| `search_appeals` | `readOnly`, `idempotent`, `openWorld` | year, authority, challenger, OCDS procedure number, status, page | `{ items: Appeal[], pagination, parserMode, … }` |
-| `search_decisions` | `readOnly`, `idempotent`, `openWorld` | year, authority, challenger, procurement object, decisionStatus[], decisionContent[], appealGrounds[], complaintObject, appealNumber, page | `{ items: Decision[], pagination, parserMode, … }` |
-| `fetch_ansc_decision` | `readOnly`, `idempotent` | ELO download URL, optional `maxBytes` | `{ text, truncated, originalBytes, metadata }` |
+| name | what it does |
+|---|---|
+| `search_appeals` | Filter appeals by year/authority/challenger/OCDS/status. Paginated. |
+| `search_decisions` | Filter decisions by year/authority/challenger/object/status/content/grounds/etc. Paginated. |
+| `get_appeal_by_registration` | Direct lookup of one appeal by `02/1245/24`-style number. Year is parsed from the suffix. |
+| `get_decision_by_number` | Direct lookup of one decision by `03D-962-24`-style number. |
+| `get_procurement_history` | Given an OCDS ID, return *every* appeal and decision tied to that tender. The OCDS timestamp seeds the year range we scan. |
+| `fetch_ansc_decision` | Download an ELO decision PDF and return extracted plain text. Emits progress notifications. |
 
-All three tools:
+All tools:
 - declare both `inputSchema` (Zod) and `outputSchema` (Zod), so clients receive
   validated `structuredContent` alongside the human‑readable `text`;
-- emit MCP `notifications/progress` for long PDF downloads;
-- honor cancellation via the `AbortSignal` provided by the SDK.
+- carry annotations (`readOnlyHint: true`, `idempotentHint: true`,
+  `openWorldHint: true|false`, `title`);
+- honor cancellation via the `AbortSignal` from the SDK;
+- normalize Romanian dates to ISO 8601 (`entryDateIso`, `dateIso`) alongside
+  the original `dd/mm/yyyy`;
+- strip trailing punctuation from `appealNumber` / `registrationNumber`.
+
+### Prompts (3)
+
+Pre-canned LLM workflows the client surfaces as slash-commands:
+
+| name | args | output |
+|---|---|---|
+| `summarize_ansc_decision` | `identifier` (decision number or ELO URL) | A starter prompt instructing the model to fetch the decision and produce a structured Romanian/English summary. |
+| `procurement_audit` | `procedureNumber` (OCDS ID) | Walks the model through `get_procurement_history` and produces a chronological narrative of every appeal + decision. |
+| `compare_appeals` | two registration numbers | Side-by-side comparison of two appeals (parties, grounds, outcome). |
 
 ### Resources
 
@@ -46,10 +63,16 @@ Two transports, picked via `MCP_TRANSPORT`:
   (`Mcp-Session-Id`) and SSE streaming on `GET /mcp`. DNS‑rebinding
   protection is enabled automatically when binding to localhost.
 
-## Authentication
+## Authentication (optional)
 
-When `MCP_TRANSPORT=http` and `AUTH_MODE=oauth`, the server runs as an
-**OAuth 2.1 Resource Server** per spec 2025‑11‑25:
+ANSC's data is **public** — anyone can browse `https://www.ansc.md`. So the
+default deployment shape is `MCP_TRANSPORT=stdio` (or `http` with
+`AUTH_MODE=none` behind a trusted reverse proxy / Tailscale).
+
+OAuth here only protects the *server itself* from abuse, not the data. If you
+deploy this on the open internet and want per-principal rate limiting and
+audit logs, set `MCP_TRANSPORT=http` and `AUTH_MODE=oauth`. The server then
+runs as an **OAuth 2.1 Resource Server** per spec 2025‑11‑25:
 
 - publishes RFC 9728 Protected Resource Metadata at
   `/.well-known/oauth-protected-resource`;
@@ -159,15 +182,18 @@ src/
   handlers/
     tools.ts              # 3 tools, Zod input/output, annotations
     resources.ts          # RFC 6570 templates + completions
+  handlers/
+    prompts.ts            # 3 LLM workflow templates
   http/
     server.ts             # Express + StreamableHTTPServerTransport (stateful)
-    auth.ts               # JoseTokenVerifier + PRM router
+    auth.ts               # JoseTokenVerifier + PRM router (opt-in)
   models/
     appeals.ts            # AppealStatus + Zod
     decisions.ts          # Decision enums + Zod
     pagination.ts         # Pagination + Zod
   utils/
     html-parser.ts        # header-name + positional, enum round-trip
+    identifiers.ts        # Romanian id + date helpers
     retry.ts              # exponential backoff with jitter
 __tests__/
   fixtures/*.html         # synthetic ANSC pages

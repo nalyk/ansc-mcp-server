@@ -19,6 +19,7 @@ import {
   Pagination,
 } from '../models/pagination.js';
 import { logger } from '../logging.js';
+import { cleanAppealNumber, dmyToIso } from './identifiers.js';
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;
 type CheerioRow = ReturnType<CheerioAPI>;
@@ -270,10 +271,12 @@ export function parseAppealsTable(
 
     const procedureHref = readHref($, $cells, get('procedureNumber'));
     const statusRaw = readCell($cells, get('status'));
+    const entryDate = readCell($cells, get('entryDate'));
 
     const appeal: Appeal = {
-      registrationNumber: readCell($cells, get('registrationNumber')),
-      entryDate: readCell($cells, get('entryDate')),
+      registrationNumber: cleanAppealNumber(readCell($cells, get('registrationNumber'))),
+      entryDate,
+      entryDateIso: dmyToIso(entryDate),
       exitNumber: readCell($cells, get('exitNumber')),
       challenger: readCell($cells, get('challenger')),
       contractingAuthority: readCell($cells, get('contractingAuthority')),
@@ -295,7 +298,8 @@ export function parseAppealsTable(
       ? 'partial'
       : 'positional';
 
-  if (parserMode !== 'header') {
+  // Don't warn on empty result pages — ANSC omits the <thead> when there are 0 rows.
+  if (parserMode !== 'header' && items.length > 0) {
     logger.warn(
       { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
       'Appeals table headers did not fully match. Falling back to positional indices.',
@@ -346,9 +350,11 @@ export function parseDecisionsTable(
     const decisionStatusRaw = readCell($cells, get('decisionStatusRaw'));
     const complaintObjectRaw = readCell($cells, get('complaintObjectRaw'));
 
+    const date = readCell($cells, get('date'));
     const decision: Decision = {
       decisionNumber: readCell($cells, get('decisionNumber')),
-      date: readCell($cells, get('date')),
+      date,
+      dateIso: dmyToIso(date),
       challenger: readCell($cells, get('challenger')),
       contractingAuthority: readCell($cells, get('contractingAuthority')),
       complaintObject: parseComplaintObject(complaintObjectRaw),
@@ -364,7 +370,7 @@ export function parseDecisionsTable(
       decisionStatusRaw,
       pdfUrl: readHref($, $cells, get('pdfUrl')),
       reportingStatus: readCell($cells, get('reportingStatus')),
-      appealNumber: readCell($cells, get('appealNumber')),
+      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
     };
 
     items.push(decision);
@@ -377,7 +383,7 @@ export function parseDecisionsTable(
       ? 'partial'
       : 'positional';
 
-  if (parserMode !== 'header') {
+  if (parserMode !== 'header' && items.length > 0) {
     logger.warn(
       { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
       'Decisions table headers did not fully match. Falling back to positional indices.',

@@ -118,6 +118,7 @@ export const COMPLAINT_OBJECT_TEXT_MAP: ReadonlyMap<string, ComplaintObject> = n
 export const DecisionSchema = z.object({
   decisionNumber: z.string().describe("e.g. '03D-6-25'"),
   date: z.string().describe('dd/mm/yyyy'),
+  dateIso: z.string().nullable().describe('ISO 8601 (yyyy-mm-dd) when parseable, null otherwise.'),
   challenger: z.string(),
   contractingAuthority: z.string(),
   complaintObject: z.nativeEnum(ComplaintObject).nullable(),
@@ -133,7 +134,7 @@ export const DecisionSchema = z.object({
   decisionStatusRaw: z.string(),
   pdfUrl: z.string().describe("ELO download URL: https://elo.ansc.md/DownloadDocs/DownloadFileServlet?id=…"),
   reportingStatus: z.string(),
-  appealNumber: z.string().describe("e.g. '02/1119/24'"),
+  appealNumber: z.string().describe("e.g. '02/1119/24' — trailing punctuation stripped."),
 });
 export type Decision = z.infer<typeof DecisionSchema>;
 

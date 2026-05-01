@@ -11,7 +11,15 @@ import {
 } from '../models/decisions.js';
 import { PaginationSchema } from '../models/pagination.js';
 import { fetchAndExtractPdf, ELO_URL_PATTERN } from '../api/pdf-fetcher.js';
+import {
+  yearFromAppealRegistration,
+  yearFromDecisionNumber,
+} from '../utils/identifiers.js';
 import { logger } from '../logging.js';
+
+function yearFromRegOrDecision(kind: 'appeal' | 'decision', id: string): number {
+  return kind === 'appeal' ? yearFromAppealRegistration(id) : yearFromDecisionNumber(id);
+}
 
 const SearchAppealsOutputShape = {
   items: z.array(AppealSchema),
@@ -27,6 +35,46 @@ const SearchDecisionsOutputShape = {
   parserMode: z.enum(['header', 'partial', 'positional']),
   unknownHeaders: z.array(z.string()),
   unknownStatuses: z.array(z.string()),
+} as const;
+
+const GetAppealInputShape = {
+  registrationNumber: z
+    .string()
+    .min(3)
+    .describe("Appeal registration number, e.g. '02/1245/24'."),
+} as const;
+
+const GetAppealOutputShape = {
+  found: z.boolean(),
+  appeal: AppealSchema.nullable(),
+  yearScanned: z.number().int().positive(),
+} as const;
+
+const GetDecisionInputShape = {
+  decisionNumber: z
+    .string()
+    .min(3)
+    .describe("Decision number, e.g. '03D-962-24'."),
+} as const;
+
+const GetDecisionOutputShape = {
+  found: z.boolean(),
+  decision: DecisionSchema.nullable(),
+  yearScanned: z.number().int().positive(),
+} as const;
+
+const GetProcurementHistoryInputShape = {
+  procedureNumber: z
+    .string()
+    .min(5)
+    .describe("OCDS procurement ID, e.g. 'ocds-b3wdp1-MD-1740472744894'."),
+} as const;
+
+const GetProcurementHistoryOutputShape = {
+  procedureNumber: z.string(),
+  yearsScanned: z.array(z.number().int()),
+  appeals: z.array(AppealSchema),
+  decisions: z.array(DecisionSchema),
 } as const;
 
 const FetchDecisionInputShape = {
@@ -121,6 +169,112 @@ export function registerTools(server: McpServer, client: AnscClient): void {
           },
         ],
         structuredContent: { ...result } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_appeal_by_registration',
+    {
+      title: 'Get an appeal by registration number',
+      description:
+        "Direct lookup of a single appeal. Year is parsed from the registration suffix " +
+        "('02/1245/24' → 2024). Scans up to 100 pages of the matching year (cached).",
+      inputSchema: GetAppealInputShape,
+      outputSchema: GetAppealOutputShape,
+      annotations: {
+        title: 'Get appeal by registration',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const yearScanned = yearFromRegOrDecision('appeal', args.registrationNumber);
+      const appeal = await client.findAppealByRegistration(args.registrationNumber, extra.signal);
+      const found = appeal !== null;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: found
+              ? `Found appeal ${appeal!.registrationNumber} (${appeal!.statusRaw}).`
+              : `No appeal '${args.registrationNumber}' found in ANSC ${yearScanned}.`,
+          },
+        ],
+        structuredContent: { found, appeal, yearScanned } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_decision_by_number',
+    {
+      title: 'Get a decision by decision number',
+      description:
+        "Direct lookup of a single ANSC decision. Year is parsed from the decision-number suffix " +
+        "('03D-962-24' → 2024).",
+      inputSchema: GetDecisionInputShape,
+      outputSchema: GetDecisionOutputShape,
+      annotations: {
+        title: 'Get decision by number',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const yearScanned = yearFromRegOrDecision('decision', args.decisionNumber);
+      const decision = await client.findDecisionByNumber(args.decisionNumber, extra.signal);
+      const found = decision !== null;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: found
+              ? `Found decision ${decision!.decisionNumber} (${decision!.decisionStatusRaw}).`
+              : `No decision '${args.decisionNumber}' found in ANSC ${yearScanned}.`,
+          },
+        ],
+        structuredContent: { found, decision, yearScanned } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_procurement_history',
+    {
+      title: 'Get every appeal and decision for one procurement',
+      description:
+        'Given an OCDS procurement ID, return every appeal filed against it and every decision linked to it. ' +
+        'Use this for a complete legal history of a specific tender.',
+      inputSchema: GetProcurementHistoryInputShape,
+      outputSchema: GetProcurementHistoryOutputShape,
+      annotations: {
+        title: 'Procurement appeal history',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const result = await client.findCaseByProcedure(args.procedureNumber, extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text:
+              `Procurement ${args.procedureNumber}: ${result.appeals.length} appeal` +
+              `${result.appeals.length === 1 ? '' : 's'}, ${result.decisions.length} decision` +
+              `${result.decisions.length === 1 ? '' : 's'} (years scanned: ${result.yearsScanned.join(', ')}).`,
+          },
+        ],
+        structuredContent: {
+          procedureNumber: args.procedureNumber,
+          yearsScanned: result.yearsScanned,
+          appeals: result.appeals,
+          decisions: result.decisions,
+        } as Record<string, unknown>,
       };
     },
   );

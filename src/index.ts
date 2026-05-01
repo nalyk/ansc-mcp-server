@@ -6,6 +6,7 @@ import { logger } from './logging.js';
 import { AnscClient } from './api/ansc-client.js';
 import { registerTools } from './handlers/tools.js';
 import { registerResources } from './handlers/resources.js';
+import { registerPrompts } from './handlers/prompts.js';
 import { buildAuthHandles } from './http/auth.js';
 import { startHttpServer } from './http/server.js';
 
@@ -35,16 +36,20 @@ async function main(): Promise<void> {
         capabilities: {
           tools: { listChanged: false },
           resources: { listChanged: false, subscribe: false },
+          prompts: { listChanged: false },
           logging: {},
         },
         instructions:
-          'Tools and resources for searching Moldovan public-procurement appeals (ANSC) and ' +
-          'fetching decision PDFs. All tools are read-only and idempotent. Use search_appeals / ' +
-          'search_decisions for browsing, fetch_ansc_decision for a single PDF. Years: 2014–current.',
+          'Tools, resources, and prompts for Moldovan public-procurement appeals (ANSC). ' +
+          'All tools are read-only and idempotent. ' +
+          'Browse with search_appeals / search_decisions; direct lookup with ' +
+          'get_appeal_by_registration / get_decision_by_number; full procurement history with ' +
+          'get_procurement_history; PDF text via fetch_ansc_decision. Years: 2014–current.',
       },
     );
     registerTools(server, client);
     registerResources(server, client);
+    registerPrompts(server);
     return server;
   };
 
