@@ -5,27 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.2] — 2026-05-02
 
 ### Changed
 
-- **Migrated npm publishing to OIDC Trusted Publishing.** The publish
-  workflow no longer reads `NPM_TOKEN`; it relies on the GitHub OIDC
-  token which the npm registry validates against the trust relationship
-  configured at <https://www.npmjs.com/package/mcp-ansc-server/access>.
-  Background: as of November 2025, npm classic Automation tokens are
+- **First fully unattended release via OIDC Trusted Publishing.** No
+  static `NPM_TOKEN` involved; the GitHub OIDC token is verified by the
+  npm registry against the trust relationship configured at
+  <https://www.npmjs.com/package/mcp-ansc-server/access>. Sigstore
+  provenance attestation is generated automatically.
+- README full refresh to match the actual surface: 12 tools (was
+  documented as 6), `npx -y mcp-ansc-server` quickstart, OIDC release
+  flow documented, project layout corrected (added orders / suspended /
+  hearings models, dependabot config, both CI workflows).
+- Migrated publish workflow to OIDC. Drops `NODE_AUTH_TOKEN`, upgrades
+  `npm` to `@latest` (≥ 11.5.1 required for OIDC), drops the
+  `--provenance` flag (auto when publishing via OIDC), and adds an
+  idempotency guard that skips publish when the version is already on
+  the registry — so `workflow_dispatch` re-runs and the bootstrap
+  publish path are safe.
+- Background: as of November 2025, npm classic Automation tokens are
   permanently revoked, and Granular Access Tokens require an IP
   allowlist to bypass 2FA — neither is viable for GitHub Actions's
   elastic IP pool. OIDC Trusted Publishing (GA since 2025-07-31) is the
   designated successor.
-- The workflow upgrades `npm` to `@latest` (≥ 11.5.1 required for OIDC),
-  drops the `--provenance` flag (Sigstore provenance is now generated
-  automatically by npm when publishing via OIDC), and adds an
-  idempotency guard that skips the publish step when the version is
-  already on the registry — so `workflow_dispatch` re-runs are safe.
-- Removed `provenance: true` from `package.json` `publishConfig` (it
-  forced provenance on every publish, including local bootstrap, which
-  has no OIDC environment).
+
+### Fixed
+
+- `bin` path no longer has a leading `./` — npm 11+ silently strips
+  bin entries with that prefix on publish, which would have shipped a
+  tarball where `npx mcp-ansc-server` does nothing. (The 1.0.1 tarball
+  shipped *with* the fix already in place because the local bootstrap
+  publish ran from the fixed HEAD; this changelog entry just documents
+  it.)
+- Removed `provenance: true` from `package.json` `publishConfig` — it
+  forced provenance attestation on every publish, including local
+  bootstrap, which has no OIDC environment to attest from.
+
+### Added
+
+- `types: "build/index.d.ts"` in `package.json` so TS consumers and
+  editors discover the declaration entrypoint without falling back to
+  heuristics.
+
+[1.0.2]: https://github.com/nalyk/ansc-mcp-server/releases/tag/v1.0.2
 
 ## [1.0.1] — 2026-05-01
 
