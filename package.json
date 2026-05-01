@@ -5,8 +5,9 @@
   "type": "module",
   "main": "build/index.js",
   "bin": {
-    "mcp-ansc-server": "./build/index.js"
+    "mcp-ansc-server": "build/index.js"
   },
+  "types": "build/index.d.ts",
   "homepage": "https://github.com/nalyk/ansc-mcp-server#readme",
   "repository": {
     "type": "git",
