@@ -18,6 +18,19 @@
   "engines": {
     "node": ">=22.0.0"
   },
+  "files": [
+    "build",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "SECURITY.md",
+    ".env.example"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "provenance": true
+  },
   "scripts": {
     "build": "tsc && node -e \"import('node:fs').then(m=>m.default.chmodSync('build/index.js','755'))\"",
     "start": "node build/index.js",

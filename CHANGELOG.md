@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-01
+
+### Changed
+
+- **First npm release.** Added `.github/workflows/publish.yml` that fires on
+  any `v*.*.*` tag, type-checks, runs tests, builds, then publishes to
+  npm with **Sigstore provenance attestation** (cryptographic proof the
+  package was built from this commit on a GitHub-hosted runner). The
+  workflow also creates the matching GitHub Release with auto-generated
+  notes. Tag↔`package.json` version drift is caught up-front and aborts
+  the publish.
+- Added `package.json` `files` field (publishes only `build/` + docs +
+  `.env.example`) and `publishConfig` (`access: public`,
+  `provenance: true`, official registry). Without these, `npm publish`
+  would either include source / tests / Docker artifacts or refuse to run.
+
+No runtime behavior changes from 1.0.0.
+
+[1.0.1]: https://github.com/nalyk/ansc-mcp-server/releases/tag/v1.0.1
+
 ## [1.0.0] — 2026-05-01
 
 First public release. Modernized rewrite of the legacy
