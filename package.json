@@ -28,8 +28,7 @@
   ],
   "publishConfig": {
     "access": "public",
-    "registry": "https://registry.npmjs.org/",
-    "provenance": true
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsc && node -e \"import('node:fs').then(m=>m.default.chmodSync('build/index.js','755'))\"",

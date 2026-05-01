@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Migrated npm publishing to OIDC Trusted Publishing.** The publish
+  workflow no longer reads `NPM_TOKEN`; it relies on the GitHub OIDC
+  token which the npm registry validates against the trust relationship
+  configured at <https://www.npmjs.com/package/mcp-ansc-server/access>.
+  Background: as of November 2025, npm classic Automation tokens are
+  permanently revoked, and Granular Access Tokens require an IP
+  allowlist to bypass 2FA — neither is viable for GitHub Actions's
+  elastic IP pool. OIDC Trusted Publishing (GA since 2025-07-31) is the
+  designated successor.
+- The workflow upgrades `npm` to `@latest` (≥ 11.5.1 required for OIDC),
+  drops the `--provenance` flag (Sigstore provenance is now generated
+  automatically by npm when publishing via OIDC), and adds an
+  idempotency guard that skips the publish step when the version is
+  already on the registry — so `workflow_dispatch` re-runs are safe.
+- Removed `provenance: true` from `package.json` `publishConfig` (it
+  forced provenance on every publish, including local bootstrap, which
+  has no OIDC environment).
+
 ## [1.0.1] — 2026-05-01
 
 ### Changed
