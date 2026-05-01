@@ -18,7 +18,7 @@ Conformant with **MCP spec 2025‑11‑25** and the **TypeScript SDK 1.29.x**.
 | `get_appeal_by_registration` | Direct lookup of one appeal by `02/1245/24`-style number. Year is parsed from the suffix. |
 | `get_decision_by_number` | Direct lookup of one decision by `03D-962-24`-style number. |
 | `get_procurement_history` | Given an OCDS ID, return *every* appeal and decision tied to that tender. The OCDS timestamp seeds the year range we scan. |
-| `fetch_ansc_decision` | Download an ELO decision PDF and return extracted plain text. Emits progress notifications. |
+| `fetch_ansc_decision` | Download an ANSC decision PDF and return its content. Native-text PDFs return extracted text. Scanned PDFs (Canon / HP / etc., common for annexed docs and older filings — typically with broken Unicode CMap that maps Romanian to garbled Cyrillic) return per‑page JPEG `image` blocks for the host vision-LLM to OCR. Force a path with `mode: 'auto' \| 'text' \| 'image'`. Uses `unpdf.extractImages` (extracts already-embedded raster bytes — no canvas backend needed) + `sharp` for re‑encoding. |
 
 All tools:
 - declare both `inputSchema` (Zod) and `outputSchema` (Zod), so clients receive
@@ -178,7 +178,7 @@ src/
   logging.ts              # pino on stderr
   api/
     ansc-client.ts        # undici + retries + lru-cache
-    pdf-fetcher.ts        # ELO PDF download + pdf-parse v2
+    pdf-fetcher.ts        # PDF download + unpdf text/image extract + sharp JPEG
   handlers/
     tools.ts              # 3 tools, Zod input/output, annotations
     resources.ts          # RFC 6570 templates + completions

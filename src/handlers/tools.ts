@@ -101,28 +101,27 @@ const FetchDecisionInputShape = {
       'Must be an ANSC PDF URL — either elo.ansc.md/DownloadDocs/DownloadFileServlet?id=<digits> or www.ansc.md/sites/...pdf.',
     )
     .describe('Full ELO download URL of the decision PDF, or a direct ansc.md PDF link (suspended decisions).'),
-  maxBytes: z
-    .number()
-    .int()
-    .positive()
-    .max(5_000_000)
+  mode: z
+    .enum(['auto', 'text', 'image'])
     .optional()
-    .default(2_000_000)
-    .describe('Truncate the extracted text to at most this many bytes (default 2 MB).'),
+    .default('auto')
+    .describe(
+      'auto = text first, fall back to per-page images for scanned PDFs (default). ' +
+        'text = always return extracted text only (may be unreadable for scans). ' +
+        'image = always return per-page JPEG images for vision-OCR by the host LLM.',
+    ),
 } as const;
 
 const FetchDecisionOutputShape = {
-  text: z.string(),
-  truncated: z.boolean(),
-  originalBytes: z.number().int().nonnegative(),
-  metadata: z.object({
-    filename: z.string(),
-    contentType: z.string(),
-    source: z.string().url(),
-    pageCount: z.number().int().nonnegative(),
-    byteLength: z.number().int().nonnegative(),
-    pdfInfo: z.record(z.string(), z.unknown()).nullable(),
-  }),
+  text: z.string().describe('Best-effort extracted text. May be unreliable for scanned PDFs — see `scanned`.'),
+  pages: z.number().int().nonnegative(),
+  filename: z.string(),
+  contentType: z.string(),
+  source: z.string().url(),
+  bytes: z.number().int().nonnegative(),
+  scanned: z.boolean().describe('True when the heuristic detected a scanned / broken-CMap PDF and emitted images.'),
+  imageCount: z.number().int().nonnegative(),
+  pdfInfo: z.record(z.string(), z.unknown()).nullable(),
 } as const;
 
 export function registerTools(server: McpServer, client: AnscClient): void {
@@ -492,8 +491,11 @@ export function registerTools(server: McpServer, client: AnscClient): void {
     {
       title: 'Fetch ANSC decision PDF',
       description:
-        'Download an ANSC decision PDF from the ELO portal and return extracted plain text. ' +
-        'Emits progress notifications during download and parsing.',
+        'Download an ANSC decision PDF (ELO portal or ansc.md/sites/...) and return its content. ' +
+        'Native-text PDFs return extracted text. Scanned PDFs (common for older or annexed documents — ' +
+        'often Canon/HP scanner output with broken Unicode CMap) return per-page JPEG `image` content blocks ' +
+        'for the host vision-LLM to OCR — language-agnostic, handles Romanian + Russian + English without ' +
+        'a local OCR install. Emits progress notifications.',
       inputSchema: FetchDecisionInputShape,
       outputSchema: FetchDecisionOutputShape,
       annotations: {
@@ -521,40 +523,72 @@ export function registerTools(server: McpServer, client: AnscClient): void {
       const fetched = await fetchAndExtractPdf(
         client,
         args.documentUrl,
+        args.mode,
         extra.signal,
         (phase, received, total) => {
           if (phase === 'download') {
             void sendProgress(received, total ?? undefined);
-          } else {
+          } else if (phase === 'parse') {
             void sendProgress(1, 1);
+          } else {
+            // images phase: progress is page index over capped count
+            if (total !== null) void sendProgress(received, total);
           }
         },
       );
 
-      const originalBytes = Buffer.byteLength(fetched.text, 'utf8');
-      const truncated = originalBytes > args.maxBytes;
-      const text = truncated ? fetched.text.slice(0, args.maxBytes) : fetched.text;
+      const imageParts = fetched.parts.filter((p) => p.type === 'image');
+      const textPart = fetched.parts.find((p) => p.type === 'text');
+      const inlineText = textPart?.text ?? '';
 
-      const summary =
-        `Extracted ${fetched.pageCount}-page PDF (${originalBytes.toLocaleString()} bytes` +
-        `${truncated ? `, truncated to ${args.maxBytes}` : ''}) from ${fetched.filename}.`;
+      const content: Array<
+        | { type: 'text'; text: string }
+        | { type: 'image'; data: string; mimeType: string }
+      > = [];
+
+      if (fetched.scanned && imageParts.length) {
+        content.push({
+          type: 'text',
+          text:
+            `Scanned PDF detected (${fetched.pages} pages, ${imageParts.length} image(s) extracted from ${fetched.filename}). ` +
+            `Embedded text was unreliable — returning page images for vision-OCR. ` +
+            (inlineText
+              ? `Best-effort text below for fallback reference:\n\n${inlineText.slice(0, 4000)}${inlineText.length > 4000 ? '\n\n[…truncated]' : ''}`
+              : ''),
+        });
+      } else if (inlineText) {
+        content.push({
+          type: 'text',
+          text: `Extracted ${fetched.pages}-page PDF (${fetched.byteLength.toLocaleString()} bytes) from ${fetched.filename}.`,
+        });
+        content.push({ type: 'text', text: inlineText });
+      } else {
+        content.push({
+          type: 'text',
+          text: `Fetched ${fetched.pages}-page PDF from ${fetched.filename} but no text was extractable.`,
+        });
+      }
+
+      for (const im of imageParts) {
+        content.push({
+          type: 'image',
+          data: im.imageBase64!,
+          mimeType: im.mimeType!,
+        });
+      }
+
       return {
-        content: [
-          { type: 'text' as const, text: summary },
-          { type: 'text' as const, text },
-        ],
+        content,
         structuredContent: {
-          text,
-          truncated,
-          originalBytes,
-          metadata: {
-            filename: fetched.filename,
-            contentType: fetched.contentType,
-            source: fetched.source,
-            pageCount: fetched.pageCount,
-            byteLength: fetched.byteLength,
-            pdfInfo: fetched.info,
-          },
+          text: fetched.text,
+          pages: fetched.pages,
+          filename: fetched.filename,
+          contentType: fetched.contentType,
+          source: fetched.source,
+          bytes: fetched.byteLength,
+          scanned: fetched.scanned,
+          imageCount: imageParts.length,
+          pdfInfo: fetched.pdfInfo,
         } as Record<string, unknown>,
       };
     },
