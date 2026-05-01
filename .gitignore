@@ -1,13 +1,55 @@
+# Dependencies
 node_modules/
+.npm/
+.pnpm-store/
+
+# Build artifacts
 build/
+dist/
 coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment / secrets
 .env
-.env.local
-.env.*.local
-.DS_Store
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+
+# Editor / IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
+*~
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Tool caches
 .cache/
+.parcel-cache/
+
+# Agent / assistant working dirs (local-only context, never push)
+.serena/
+.claude/
+
+# Process / runtime
+*.pid
+*.pid.lock
