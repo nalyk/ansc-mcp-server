@@ -15,8 +15,15 @@ import {
 import {
   parseAppealsTable,
   parseDecisionsTable,
+  parseOrdersTable,
+  parseSuspendedDecisionsTable,
+  parseAgendaListing,
+  parseAgendaDay,
   ParseResult,
 } from '../utils/html-parser.js';
+import type { Order } from '../models/orders.js';
+import type { SuspendedDecision } from '../models/suspended.js';
+import type { Hearing, HearingDay } from '../models/hearings.js';
 import { withRetry } from '../utils/retry.js';
 import type { AppConfig } from '../config.js';
 import { logger } from '../logging.js';
@@ -115,6 +122,106 @@ export class AnscClient {
     );
     const html = await this.#fetchHtml(url, year, signal);
     return parseDecisionsTable(html, { requestedPage: params.page ?? 0 });
+  }
+
+  async searchOrders(
+    year: number | undefined,
+    page: number,
+    kind: 'general' | 'suspension',
+    signal?: AbortSignal,
+  ): Promise<ParseResult<Order>> {
+    const y = year ?? new Date().getFullYear();
+    const slug = kind === 'suspension' ? 'incheieri-de-suspendare' : 'incheieri';
+    const qs = new URLSearchParams();
+    if (page > 0) qs.append('page', String(page));
+    const url = new URL(
+      `/ro/content/${slug}-${y}${qs.size ? '?' + qs.toString() : ''}`,
+      ANSC_BASE,
+    );
+    const html = await this.#fetchHtml(url, y, signal);
+    return parseOrdersTable(html, { requestedPage: page });
+  }
+
+  async searchSuspendedDecisions(
+    year: number | undefined,
+    page: number,
+    signal?: AbortSignal,
+  ): Promise<ParseResult<SuspendedDecision>> {
+    const y = year ?? new Date().getFullYear();
+    const qs = new URLSearchParams();
+    if (page > 0) qs.append('page', String(page));
+    const url = new URL(
+      `/ro/content/decizii-suspendate-${y}${qs.size ? '?' + qs.toString() : ''}`,
+      ANSC_BASE,
+    );
+    const html = await this.#fetchHtml(url, y, signal);
+    return parseSuspendedDecisionsTable(html, { requestedPage: page });
+  }
+
+  async listUpcomingHearings(signal?: AbortSignal): Promise<HearingDay[]> {
+    const url = new URL('/ro/agenda', ANSC_BASE);
+    const html = await this.#fetchHtml(url, new Date().getFullYear(), signal);
+    return parseAgendaListing(html, ANSC_BASE);
+  }
+
+  async getHearingsForDay(
+    agendaUrl: string,
+    signal?: AbortSignal,
+  ): Promise<{ dateIso: string | null; hearings: Hearing[] }> {
+    const url = new URL(agendaUrl, ANSC_BASE);
+    const html = await this.#fetchHtml(url, new Date().getFullYear(), signal);
+    return parseAgendaDay(html, url.toString());
+  }
+
+  /**
+   * Across the upcoming-agenda listing, look for any hearing with the given
+   * appeal registration number. Returns matches with their hearing details.
+   */
+  async findHearingForAppeal(
+    rawRegistrationNumber: string,
+    signal?: AbortSignal,
+  ): Promise<Hearing[]> {
+    const target = cleanAppealNumber(rawRegistrationNumber);
+    const days = await this.listUpcomingHearings(signal);
+    const matches: Hearing[] = [];
+    for (const day of days) {
+      const { hearings } = await this.getHearingsForDay(day.url, signal);
+      for (const h of hearings) {
+        if (cleanAppealNumber(h.registrationNumber) === target) {
+          matches.push(h);
+        }
+      }
+    }
+    return matches;
+  }
+
+  /**
+   * Cross-checks the suspended-decisions listing for any decision matching the
+   * given regular decision number's year+appealNumber. Used to surface court
+   * suspension status alongside `get_decision_by_number`.
+   */
+  async findSuspendedFromDecision(
+    decision: { decisionNumber: string; appealNumber: string },
+    signal?: AbortSignal,
+  ): Promise<SuspendedDecision | null> {
+    const year = yearFromDecisionNumber(decision.decisionNumber);
+    const target = cleanAppealNumber(decision.appealNumber);
+    if (!target) return null;
+    // Suspension orders may be issued in the same or next year.
+    for (const yr of [year, year + 1]) {
+      const first = await this.searchSuspendedDecisions(yr, 0, signal);
+      const all = first.items.slice();
+      const total = Math.min(first.pagination.totalPages, FIND_PAGE_HARD_CAP);
+      for (let p = 1; p < total; p++) {
+        const r = await this.searchSuspendedDecisions(yr, p, signal);
+        all.push(...r.items);
+      }
+      const hit = all.find(
+        (s) => cleanAppealNumber(s.appealNumber) === target,
+      );
+      if (hit) return hit;
+    }
+    return null;
   }
 
   /**

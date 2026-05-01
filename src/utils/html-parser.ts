@@ -18,8 +18,23 @@ import {
   PaginatedResponse,
   Pagination,
 } from '../models/pagination.js';
+import {
+  Order,
+} from '../models/orders.js';
+import {
+  SuspendedDecision,
+} from '../models/suspended.js';
+import {
+  Hearing,
+  HearingDay,
+} from '../models/hearings.js';
 import { logger } from '../logging.js';
-import { cleanAppealNumber, dmyToIso } from './identifiers.js';
+import {
+  cleanAppealNumber,
+  dmyToIso,
+  dotDmyToIso,
+  romanianDateLabelToIso,
+} from './identifiers.js';
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;
 type CheerioRow = ReturnType<CheerioAPI>;
@@ -403,6 +418,304 @@ export function parseDecisionsTable(
     unknownHeaders: unknown,
     unknownStatuses: [...unknownStatuses],
   };
+}
+
+// ----------------------------------------------------------------------------
+// Orders (încheieri) — same #myTable structure as decisions, different domain.
+// ----------------------------------------------------------------------------
+
+const ORDER_HEADER_MAP: ReadonlyMap<string, keyof Order> = new Map([
+  ['nr. incheiere', 'orderNumber'],
+  ['nr. încheiere', 'orderNumber'],
+  ['data incheiere', 'date'],
+  ['data încheiere', 'date'],
+  ['contestatar', 'challenger'],
+  ['contestator', 'challenger'],
+  ['autoritatea contractanta', 'contractingAuthority'],
+  ['autoritatea contractantă', 'contractingAuthority'],
+  ['elementele contestatiei', 'appealElements'],
+  ['elementele contestației', 'appealElements'],
+  ['continutul incheierii', 'contentRaw'],
+  ['conținutul încheierii', 'contentRaw'],
+  ['complet', 'panel'],
+  ['nr. procedurii', 'procedureNumber'],
+  ['tip procedura', 'procedureType'],
+  ['tip procedură', 'procedureType'],
+  ['obiectul achizitiei', 'procurementObject'],
+  ['obiectul achiziției', 'procurementObject'],
+  ['statut incheiere', 'statusRaw'],
+  ['statut încheiere', 'statusRaw'],
+  ['nr. contestatie', 'appealNumber'],
+  ['nr. contestație', 'appealNumber'],
+  ['încheierea', 'pdfUrl'],
+  ['incheierea', 'pdfUrl'],
+]);
+
+const ORDER_POSITIONAL_FIELDS: readonly (keyof Order)[] = [
+  'orderNumber',
+  'date',
+  'challenger',
+  'contractingAuthority',
+  'appealElements',
+  'contentRaw',
+  'panel',
+  'procedureNumber',
+  'procedureType',
+  'procurementObject',
+  'statusRaw',
+  'appealNumber',
+  'pdfUrl',
+];
+
+export function parseOrdersTable(
+  html: string,
+  opts: ParseOptions,
+): ParseResult<Order> {
+  const $ = cheerio.load(html);
+  const items: Order[] = [];
+  const unknownStatuses = new Set<string>();
+  const { byField, unknown } = buildColumnIndex<Order>($, ORDER_HEADER_MAP);
+  const headerCovered = byField.size >= ORDER_POSITIONAL_FIELDS.length - 1;
+
+  $('#myTable tbody tr').each((_, row) => {
+    const $row = $(row);
+    const $cells = $row.find('td');
+    if ($cells.length < ORDER_POSITIONAL_FIELDS.length - 2) return;
+
+    const get = (field: keyof Order): number | undefined => {
+      const fromHeader = byField.get(field);
+      if (fromHeader !== undefined) return fromHeader;
+      const positional = ORDER_POSITIONAL_FIELDS.indexOf(field);
+      return positional >= 0 ? positional : undefined;
+    };
+
+    const date = readCell($cells, get('date'));
+    const statusRaw = readCell($cells, get('statusRaw'));
+
+    const order: Order = {
+      orderNumber: readCell($cells, get('orderNumber')),
+      date,
+      dateIso: dmyToIso(date),
+      challenger: readCell($cells, get('challenger')),
+      contractingAuthority: readCell($cells, get('contractingAuthority')),
+      appealElements: readCell($cells, get('appealElements')),
+      contentRaw: readCell($cells, get('contentRaw')),
+      panel: readCell($cells, get('panel')),
+      procedureNumber: readCell($cells, get('procedureNumber')),
+      procedureType: readCell($cells, get('procedureType')),
+      procurementObject: readCell($cells, get('procurementObject')),
+      status: parseDecisionStatus(statusRaw, unknownStatuses),
+      statusRaw,
+      pdfUrl: readHref($, $cells, get('pdfUrl')),
+      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
+    };
+    items.push(order);
+  });
+
+  const pagination = parsePagination($, opts.requestedPage);
+  const parserMode = headerCovered ? 'header' : byField.size > 0 ? 'partial' : 'positional';
+  if (parserMode !== 'header' && items.length > 0) {
+    logger.warn(
+      { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
+      'Orders table headers did not fully match. Falling back to positional indices.',
+    );
+  }
+  return {
+    items,
+    pagination,
+    parserMode,
+    unknownHeaders: unknown,
+    unknownStatuses: [...unknownStatuses],
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Suspended decisions — same #myTable structure, separate listing.
+// ----------------------------------------------------------------------------
+
+const SUSPENDED_HEADER_MAP: ReadonlyMap<string, keyof SuspendedDecision> = new Map([
+  ['nr. deciziei', 'decisionNumber'],
+  ['data deciziei', 'date'],
+  ['contestatar', 'challenger'],
+  ['contestator', 'challenger'],
+  ['autoritatea contractanta', 'contractingAuthority'],
+  ['autoritatea contractantă', 'contractingAuthority'],
+  ['obiectul contestatiei', 'complaintObjectRaw'],
+  ['obiectul contestației', 'complaintObjectRaw'],
+  ['conținutul deciziei', 'contentRaw'],
+  ['continutul deciziei', 'contentRaw'],
+  ['decizia', 'pdfUrl'],
+  ['nr procedurii', 'procedureNumber'],
+  ['nr. procedurii', 'procedureNumber'],
+  ['obiectul achizitiei', 'procurementObject'],
+  ['obiectul achiziției', 'procurementObject'],
+  ['nr. inregistrare contestatie la ansc', 'appealNumber'],
+  ['nr. înregistrare contestație la ansc', 'appealNumber'],
+  ['decizii raportat/neraportat', 'reportingStatus'],
+]);
+
+const SUSPENDED_POSITIONAL_FIELDS: readonly (keyof SuspendedDecision)[] = [
+  'decisionNumber',
+  'date',
+  'challenger',
+  'contractingAuthority',
+  'complaintObjectRaw',
+  'contentRaw',
+  'pdfUrl',
+  'procedureNumber',
+  'procurementObject',
+  'appealNumber',
+  'reportingStatus',
+];
+
+export function parseSuspendedDecisionsTable(
+  html: string,
+  opts: ParseOptions,
+): ParseResult<SuspendedDecision> {
+  const $ = cheerio.load(html);
+  const items: SuspendedDecision[] = [];
+  const { byField, unknown } = buildColumnIndex<SuspendedDecision>(
+    $,
+    SUSPENDED_HEADER_MAP,
+  );
+  const headerCovered = byField.size >= SUSPENDED_POSITIONAL_FIELDS.length - 2;
+
+  $('#myTable tbody tr').each((_, row) => {
+    const $row = $(row);
+    const $cells = $row.find('td');
+    if ($cells.length < SUSPENDED_POSITIONAL_FIELDS.length - 2) return;
+
+    const get = (field: keyof SuspendedDecision): number | undefined => {
+      const fromHeader = byField.get(field);
+      if (fromHeader !== undefined) return fromHeader;
+      const positional = SUSPENDED_POSITIONAL_FIELDS.indexOf(field);
+      return positional >= 0 ? positional : undefined;
+    };
+
+    // Suspended-decision PDFs are direct ansc.md/sites/... links, not ELO.
+    const pdfIdx = get('pdfUrl');
+    let pdfUrl = '';
+    if (pdfIdx !== undefined) {
+      const cell = $cells.eq(pdfIdx);
+      pdfUrl = cell.find('a').attr('href') ?? '';
+    }
+
+    const date = readCell($cells, get('date'));
+    const item: SuspendedDecision = {
+      decisionNumber: readCell($cells, get('decisionNumber')),
+      date,
+      dateIso: dmyToIso(date),
+      challenger: readCell($cells, get('challenger')),
+      contractingAuthority: readCell($cells, get('contractingAuthority')),
+      complaintObjectRaw: readCell($cells, get('complaintObjectRaw')),
+      contentRaw: readCell($cells, get('contentRaw')),
+      pdfUrl,
+      procedureNumber: readCell($cells, get('procedureNumber')),
+      procurementObject: readCell($cells, get('procurementObject')),
+      appealNumber: cleanAppealNumber(readCell($cells, get('appealNumber'))),
+      reportingStatus: readCell($cells, get('reportingStatus')),
+    };
+    items.push(item);
+  });
+
+  const pagination = parsePagination($, opts.requestedPage);
+  const parserMode = headerCovered ? 'header' : byField.size > 0 ? 'partial' : 'positional';
+  if (parserMode !== 'header' && items.length > 0) {
+    logger.warn(
+      { unknownHeaders: unknown, mode: parserMode, fieldsMatched: byField.size },
+      'Suspended-decisions table headers did not fully match. Falling back to positional indices.',
+    );
+  }
+  return {
+    items,
+    pagination,
+    parserMode,
+    unknownHeaders: unknown,
+    unknownStatuses: [],
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Hearing schedule
+// ----------------------------------------------------------------------------
+
+export function parseAgendaListing(html: string, baseUrl: string): HearingDay[] {
+  const $ = cheerio.load(html);
+  const out: HearingDay[] = [];
+  $('.views-row').each((_, row) => {
+    const $row = $(row);
+    const $title = $row.find('.views-field-title a').first();
+    const url = $title.attr('href') ?? '';
+    if (!url) return;
+    const title = $title.text().replace(/\s+/g, ' ').trim();
+    const dateLabel = title.replace(/^Agenda ședințelor.*pentru\s+/i, '').trim();
+    const dateIso = romanianDateLabelToIso(dateLabel);
+    const startTime = $row.find('.fancy-time').first().text().trim() || null;
+    const absoluteUrl = url.startsWith('http') ? url : new URL(url, baseUrl).toString();
+    out.push({ dateLabel, dateIso, url: absoluteUrl, startTime });
+  });
+  return out;
+}
+
+export function parseAgendaDay(
+  html: string,
+  agendaUrl: string,
+): { dateIso: string | null; hearings: Hearing[] } {
+  const $ = cheerio.load(html);
+  // Try the structured dc:date attribute first.
+  const dcDate = $('span[property="dc:date"]').attr('content');
+  let dateIso: string | null = null;
+  if (dcDate) {
+    const m = /^(\d{4}-\d{2}-\d{2})/.exec(dcDate);
+    if (m) dateIso = m[1] ?? null;
+  }
+  if (!dateIso) {
+    // Fallback: parse from URL slug or H1.
+    const h1 = $('h1').first().text();
+    dateIso = romanianDateLabelToIso(h1.replace(/^Agenda.*pentru\s+/i, ''));
+  }
+
+  const hearings: Hearing[] = [];
+  // The body table is the first <table> inside .field-name-body.
+  const $table = $('.field-name-body table').first();
+  if ($table.length === 0) return { dateIso, hearings };
+
+  // Skip header row (first <tr>); we read by position because the header is in <p><strong>.
+  $table.find('tr').each((idx, row) => {
+    if (idx === 0) return;
+    const $cells = $(row).find('td');
+    if ($cells.length < 7) return;
+    const ordinalText = $cells.eq(0).text().replace(/\s+/g, ' ').trim();
+    const ordinal = parseInt(ordinalText, 10);
+    if (Number.isNaN(ordinal)) return;
+    const date = $cells.eq(1).text().replace(/\s+/g, ' ').trim();
+    const time = $cells.eq(2).text().replace(/\s+/g, ' ').trim();
+    const parties = $cells.eq(3).text().replace(/\s+/g, ' ').trim();
+    const registrationNumber = cleanAppealNumber(
+      $cells.eq(4).text().replace(/\s+/g, ' ').trim(),
+    );
+    const object = $cells.eq(5).text().replace(/\s+/g, ' ').trim();
+    const panel = $cells.eq(6).text().replace(/\s+/g, ' ').trim();
+
+    const slashIdx = parties.indexOf('/');
+    const challenger = slashIdx >= 0 ? parties.slice(0, slashIdx).trim() : parties;
+    const contractingAuthority = slashIdx >= 0 ? parties.slice(slashIdx + 1).trim() : '';
+
+    hearings.push({
+      ordinal,
+      date,
+      dateIso: dotDmyToIso(date) ?? dateIso,
+      time,
+      parties,
+      challenger,
+      contractingAuthority,
+      registrationNumber,
+      object,
+      panel,
+      agendaUrl,
+    });
+  });
+  return { dateIso, hearings };
 }
 
 function parsePagination($: CheerioAPI, requestedPage: number): Pagination {

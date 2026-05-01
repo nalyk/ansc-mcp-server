@@ -10,7 +10,10 @@ import {
   DecisionSearchInputShape,
 } from '../models/decisions.js';
 import { PaginationSchema } from '../models/pagination.js';
-import { fetchAndExtractPdf, ELO_URL_PATTERN } from '../api/pdf-fetcher.js';
+import { fetchAndExtractPdf, PDF_URL_PATTERN } from '../api/pdf-fetcher.js';
+import { OrderSchema } from '../models/orders.js';
+import { SuspendedDecisionSchema } from '../models/suspended.js';
+import { HearingSchema, HearingDaySchema } from '../models/hearings.js';
 import {
   yearFromAppealRegistration,
   yearFromDecisionNumber,
@@ -81,8 +84,11 @@ const FetchDecisionInputShape = {
   documentUrl: z
     .string()
     .url()
-    .regex(ELO_URL_PATTERN, 'Must be a https://elo.ansc.md/DownloadDocs/DownloadFileServlet?id=<digits> URL.')
-    .describe('Full ELO download URL of the decision PDF.'),
+    .regex(
+      PDF_URL_PATTERN,
+      'Must be an ANSC PDF URL — either elo.ansc.md/DownloadDocs/DownloadFileServlet?id=<digits> or www.ansc.md/sites/...pdf.',
+    )
+    .describe('Full ELO download URL of the decision PDF, or a direct ansc.md PDF link (suspended decisions).'),
   maxBytes: z
     .number()
     .int()
@@ -274,6 +280,285 @@ export function registerTools(server: McpServer, client: AnscClient): void {
           yearsScanned: result.yearsScanned,
           appeals: result.appeals,
           decisions: result.decisions,
+        } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'search_orders',
+    {
+      title: 'Search ANSC procedural orders (încheieri)',
+      description:
+        'Procedural orders issued during an appeal (before/alongside the final decision). ' +
+        'Use kind="suspension" for orders that suspend a procurement (incheieri-de-suspendare).',
+      inputSchema: {
+        year: z.number().int().min(2014).max(9999).optional(),
+        kind: z.enum(['general', 'suspension']).optional().default('general'),
+        page: z.number().int().nonnegative().optional().default(0),
+      },
+      outputSchema: {
+        items: z.array(OrderSchema),
+        pagination: PaginationSchema,
+        kind: z.enum(['general', 'suspension']),
+        parserMode: z.enum(['header', 'partial', 'positional']),
+      },
+      annotations: {
+        title: 'Search orders',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const r = await client.searchOrders(args.year, args.page, args.kind, extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${r.items.length} order${r.items.length === 1 ? '' : 's'} (${args.kind}) for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`,
+          },
+        ],
+        structuredContent: {
+          items: r.items,
+          pagination: r.pagination,
+          kind: args.kind,
+          parserMode: r.parserMode,
+        } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'search_suspended_decisions',
+    {
+      title: 'Search court-suspended decisions',
+      description:
+        'Decisions whose effect has been suspended by a court (decizii-suspendate). ' +
+        'A decision listed here may also appear in search_decisions with status `În vigoare` — ' +
+        'its presence here is the authoritative signal that a court has paused enforcement.',
+      inputSchema: {
+        year: z.number().int().min(2014).max(9999).optional(),
+        page: z.number().int().nonnegative().optional().default(0),
+      },
+      outputSchema: {
+        items: z.array(SuspendedDecisionSchema),
+        pagination: PaginationSchema,
+        parserMode: z.enum(['header', 'partial', 'positional']),
+      },
+      annotations: {
+        title: 'Search suspended decisions',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const r = await client.searchSuspendedDecisions(args.year, args.page, extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Found ${r.items.length} suspended decision${r.items.length === 1 ? '' : 's'} for ${args.year ?? new Date().getFullYear()}, page ${args.page}.`,
+          },
+        ],
+        structuredContent: {
+          items: r.items,
+          pagination: r.pagination,
+          parserMode: r.parserMode,
+        } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'list_upcoming_hearings',
+    {
+      title: 'List upcoming public hearing days',
+      description:
+        'Returns the days for which ANSC has published a hearing agenda. Use these URLs ' +
+        'with get_hearings_for_day to retrieve the cases scheduled on each day.',
+      inputSchema: {},
+      outputSchema: {
+        days: z.array(HearingDaySchema),
+      },
+      annotations: {
+        title: 'Upcoming hearings',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (_args, extra) => {
+      const days = await client.listUpcomingHearings(extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `${days.length} hearing day${days.length === 1 ? '' : 's'} on ANSC's agenda.`,
+          },
+        ],
+        structuredContent: { days } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'get_hearings_for_day',
+    {
+      title: 'Get all hearings scheduled on a given day',
+      description:
+        'Fetch the agenda for a specific day (by its agenda URL or by ISO date). Returns ' +
+        'every case with time, parties, registration number, object, and panel.',
+      inputSchema: {
+        agendaUrl: z
+          .string()
+          .url()
+          .optional()
+          .describe('Full agenda URL from list_upcoming_hearings.'),
+        dateIso: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD')
+          .optional()
+          .describe('Alternatively, ISO date — looks up the corresponding agenda.'),
+      },
+      outputSchema: {
+        dateIso: z.string().nullable(),
+        hearings: z.array(HearingSchema),
+      },
+      annotations: {
+        title: 'Hearings for day',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      let url = args.agendaUrl;
+      if (!url) {
+        if (!args.dateIso) {
+          throw new Error('Either agendaUrl or dateIso must be provided.');
+        }
+        const days = await client.listUpcomingHearings(extra.signal);
+        const match = days.find((d) => d.dateIso === args.dateIso);
+        if (!match) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `No published agenda for ${args.dateIso}.`,
+              },
+            ],
+            structuredContent: { dateIso: args.dateIso, hearings: [] } as Record<string, unknown>,
+          };
+        }
+        url = match.url;
+      }
+      const result = await client.getHearingsForDay(url, extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `${result.hearings.length} hearing${result.hearings.length === 1 ? '' : 's'} on ${result.dateIso ?? 'this day'}.`,
+          },
+        ],
+        structuredContent: result as unknown as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'find_hearing_for_appeal',
+    {
+      title: 'Find the hearing(s) scheduled for an appeal',
+      description:
+        'Given an appeal registration number (e.g. "02/230/26"), scan ANSC\'s currently published ' +
+        'agenda days and return any matching hearings. Use this to answer "when is my hearing?".',
+      inputSchema: {
+        registrationNumber: z
+          .string()
+          .min(3)
+          .describe("Appeal registration number, e.g. '02/230/26'."),
+      },
+      outputSchema: {
+        registrationNumber: z.string(),
+        matches: z.array(HearingSchema),
+      },
+      annotations: {
+        title: 'Find hearing for appeal',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const matches = await client.findHearingForAppeal(args.registrationNumber, extra.signal);
+      return {
+        content: [
+          {
+            type: 'text',
+            text: matches.length
+              ? `${matches.length} scheduled hearing${matches.length === 1 ? '' : 's'} for ${args.registrationNumber}.`
+              : `No upcoming hearing currently published for ${args.registrationNumber}.`,
+          },
+        ],
+        structuredContent: {
+          registrationNumber: args.registrationNumber,
+          matches,
+        } as Record<string, unknown>,
+      };
+    },
+  );
+
+  server.registerTool(
+    'check_decision_court_status',
+    {
+      title: 'Check whether a decision has been suspended by a court',
+      description:
+        'Looks up a decision by number, then cross-checks the suspended-decisions listing. ' +
+        'Returns the canonical decision plus, if applicable, the corresponding suspension entry.',
+      inputSchema: {
+        decisionNumber: z.string().min(3),
+      },
+      outputSchema: {
+        decision: DecisionSchema.nullable(),
+        suspension: SuspendedDecisionSchema.nullable(),
+        isSuspended: z.boolean(),
+      },
+      annotations: {
+        title: 'Decision court status',
+        readOnlyHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async (args, extra) => {
+      const decision = await client.findDecisionByNumber(args.decisionNumber, extra.signal);
+      if (!decision) {
+        return {
+          content: [{ type: 'text', text: `Decision ${args.decisionNumber} not found.` }],
+          structuredContent: {
+            decision: null,
+            suspension: null,
+            isSuspended: false,
+          } as Record<string, unknown>,
+        };
+      }
+      const suspension = await client.findSuspendedFromDecision(decision, extra.signal);
+      const isSuspended = suspension !== null;
+      return {
+        content: [
+          {
+            type: 'text',
+            text: isSuspended
+              ? `Decision ${decision.decisionNumber} is COURT-SUSPENDED (suspension entry ${suspension!.decisionNumber}, ${suspension!.date}).`
+              : `Decision ${decision.decisionNumber} is in force; no court suspension found.`,
+          },
+        ],
+        structuredContent: {
+          decision,
+          suspension,
+          isSuspended,
         } as Record<string, unknown>,
       };
     },

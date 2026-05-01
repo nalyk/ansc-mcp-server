@@ -107,6 +107,10 @@ export const DECISION_CONTENT_TEXT_MAP: ReadonlyMap<string, DecisionContent> = n
   ['Contestatie lipsita de interes', DecisionContent.ComplaintWithoutInterest],
   ['Ca rămasă fără obiect', DecisionContent.ComplaintMoot],
   ['Ca ramasa fara obiect', DecisionContent.ComplaintMoot],
+  ['Nu ține de competență', DecisionContent.ReturnedWithoutMeritReview],
+  ['Nu tine de competenta', DecisionContent.ReturnedWithoutMeritReview],
+  ['Taxa de stat neachitată', DecisionContent.ReturnedWithoutMeritReview],
+  ['Taxa de stat neachitata', DecisionContent.ReturnedWithoutMeritReview],
 ]);
 
 export const COMPLAINT_OBJECT_TEXT_MAP: ReadonlyMap<string, ComplaintObject> = new Map([

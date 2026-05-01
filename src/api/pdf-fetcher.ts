@@ -1,8 +1,16 @@
 import { PDFParse } from 'pdf-parse';
 import type { AnscClient } from './ansc-client.js';
 
-export const ELO_URL_PATTERN =
-  /^https:\/\/elo\.ansc\.md\/DownloadDocs\/DownloadFileServlet\?id=\d+$/;
+/**
+ * Accepts both the ELO portal URL (used by regular decisions and orders) and
+ * direct file links served by `www.ansc.md/sites/...` (used by suspended
+ * decisions). Only ANSC-controlled hostnames are allowed.
+ */
+export const PDF_URL_PATTERN =
+  /^https:\/\/(elo\.ansc\.md\/DownloadDocs\/DownloadFileServlet\?id=\d+|www\.ansc\.md\/sites\/[^?#]+\.pdf(\?.*)?)$/i;
+
+/** @deprecated Kept as alias for any external callers — use PDF_URL_PATTERN. */
+export const ELO_URL_PATTERN = PDF_URL_PATTERN;
 
 export interface FetchedPdf {
   text: string;
@@ -21,9 +29,9 @@ export async function fetchAndExtractPdf(
   onProgress?: (phase: 'download' | 'parse', received: number, total: number | null) => void,
 ): Promise<FetchedPdf> {
   const url = new URL(rawUrl.replace(/^http:\/\//, 'https://'));
-  if (!ELO_URL_PATTERN.test(url.toString())) {
+  if (!PDF_URL_PATTERN.test(url.toString())) {
     throw new Error(
-      'documentUrl must match https://elo.ansc.md/DownloadDocs/DownloadFileServlet?id=<digits>',
+      'documentUrl must point to an ANSC PDF: either elo.ansc.md/DownloadDocs/DownloadFileServlet?id=<digits> or www.ansc.md/sites/.../*.pdf',
     );
   }
 

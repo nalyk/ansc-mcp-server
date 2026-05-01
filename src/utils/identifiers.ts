@@ -64,6 +64,42 @@ export function yearFromOcdsId(ocdsId: string): number | null {
   return isPlausibleYear(year) ? year : null;
 }
 
+/** Romanian month names → 1..12. Accepts diacritic-less variants. */
+const RO_MONTHS: ReadonlyMap<string, number> = new Map([
+  ['ianuarie', 1], ['februarie', 2], ['martie', 3], ['aprilie', 4],
+  ['mai', 5], ['iunie', 6], ['iulie', 7], ['august', 8],
+  ['septembrie', 9], ['octombrie', 10], ['noiembrie', 11], ['decembrie', 12],
+  // English (used by fancy-month spans on /ro/agenda)
+  ['jan', 1], ['feb', 2], ['mar', 3], ['apr', 4], ['may', 5], ['jun', 6],
+  ['jul', 7], ['aug', 8], ['sep', 9], ['oct', 10], ['nov', 11], ['dec', 12],
+]);
+
+export function romanianMonthToNumber(name: string): number | null {
+  return RO_MONTHS.get(name.trim().toLowerCase()) ?? null;
+}
+
+/** Parse Romanian date label like "29 aprilie 2026" → ISO. */
+export function romanianDateLabelToIso(label: string): string | null {
+  const m = /(\d{1,2})\s+([A-Za-zĂÂÎȘȚăâîșț]+)\s+(\d{4})/.exec(label);
+  if (!m) return null;
+  const day = Number(m[1]);
+  const month = romanianMonthToNumber(m[2]!);
+  const year = Number(m[3]);
+  if (month === null || day < 1 || day > 31) return null;
+  return `${year.toString().padStart(4, '0')}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+}
+
+/** dd.mm.yyyy → ISO (the agenda body uses periods). */
+export function dotDmyToIso(raw: string): string | null {
+  const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$/.exec(raw);
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const day = Number(dd);
+  const month = Number(mm);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${yyyy}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+}
+
 export function isPlausibleYear(n: number): boolean {
   return Number.isInteger(n) && n >= ANSC_FIRST_YEAR && n <= ANSC_LAST_REASONABLE_YEAR;
 }
