@@ -1,0 +1,14 @@
+node_modules
+build
+coverage
+.git
+.github
+__tests__
+*.log
+.env
+.env.*
+.vscode
+.idea
+src_docs
+fetch_ansc_decision_implementation_plan.md
+README.md

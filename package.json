@@ -1,0 +1,52 @@
+{
+  "name": "mcp-ansc-server",
+  "version": "1.0.0-rc.1",
+  "description": "MCP server for Moldova's National Agency for Solving Complaints (ANSC) — appeals and decisions in public procurement.",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "mcp-ansc-server": "./build/index.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc && node -e \"import('node:fs').then(m=>m.default.chmodSync('build/index.js','755'))\"",
+    "start": "node build/index.js",
+    "start:http": "MCP_TRANSPORT=http node build/index.js",
+    "dev": "tsc --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "tsc --noEmit",
+    "inspect": "npx --yes @modelcontextprotocol/inspector node build/index.js",
+    "clean": "rm -rf build coverage"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ansc",
+    "moldova",
+    "public-procurement",
+    "appeals"
+  ],
+  "author": "Ion Nalyk Calmis",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cheerio": "^1.2.0",
+    "express": "^5.2.0",
+    "jose": "^6.2.0",
+    "lru-cache": "^11.3.0",
+    "pdf-parse": "^2.4.0",
+    "pino": "^10.3.0",
+    "undici": "^8.1.0",
+    "zod": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "jest": "^30.0.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.8.0"
+  }
+}
