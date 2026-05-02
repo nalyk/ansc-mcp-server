@@ -1,6 +1,6 @@
 # mcp-ansc-server
 
-[![Listed on Yoda Digital Open Source](https://img.shields.io/badge/listed%20on-opensource.yoda.digital-af9568?style=flat-square)](https://opensource.yoda.digital/projects/ansc-mcp-server/)
+[![Listed on Yoda Digital Open Source](https://img.shields.io/badge/listed%20on-opensource.yoda.digital-af9568?style=flat-square)](https://opensource.yoda.digital/en/projects/ansc-mcp-server/)
 [![npm version](https://img.shields.io/npm/v/mcp-ansc-server.svg?label=npm)](https://www.npmjs.com/package/mcp-ansc-server)
 [![npm downloads](https://img.shields.io/npm/dm/mcp-ansc-server.svg)](https://www.npmjs.com/package/mcp-ansc-server)
 [![GitHub release](https://img.shields.io/github/v/release/nalyk/ansc-mcp-server?display_name=tag&sort=semver)](https://github.com/nalyk/ansc-mcp-server/releases)

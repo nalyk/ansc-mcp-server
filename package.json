@@ -8,7 +8,7 @@
     "mcp-ansc-server": "build/index.js"
   },
   "types": "build/index.d.ts",
-  "homepage": "https://opensource.yoda.digital/projects/ansc-mcp-server/",
+  "homepage": "https://opensource.yoda.digital/en/projects/ansc-mcp-server/",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/nalyk/ansc-mcp-server.git"
